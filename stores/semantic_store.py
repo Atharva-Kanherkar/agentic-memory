@@ -12,7 +12,10 @@ class SemanticStore(BaseStore):
 
     def __init__(self):
         client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-        self._collection = client.get_or_create_collection(name="semantic_memories")
+        self._collection = client.get_or_create_collection(
+            name="semantic_memories",
+            metadata={"hnsw:space": "cosine"},
+        )
         self._embedder = GeminiEmbedder()
 
     # ── write ──────────────────────────────────────────────────────────────
@@ -40,6 +43,24 @@ class SemanticStore(BaseStore):
             return None
         return self._from_result(result, 0)
 
+    def retrieve(self, query: str, top_k: int = 5) -> list[tuple[SemanticMemory, float]]:
+        query_embedding = self._embedder.embed_query(query)
+        result = self._collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            include=["embeddings", "documents", "metadatas", "distances"],
+        )
+        if not result["ids"] or not result["ids"][0]:
+            return []
+
+        pairs = []
+        for i in range(len(result["ids"][0])):
+            record = self._from_query_result(result, i)
+            # ChromaDB cosine distance = 1 - similarity
+            similarity = 1.0 - result["distances"][0][i]
+            pairs.append((record, similarity))
+        return pairs
+
     # ── serialisation helpers ──────────────────────────────────────────────
     # ChromaDB metadata must be flat (str/int/float/bool only — no nested dicts).
 
@@ -55,11 +76,27 @@ class SemanticStore(BaseStore):
         }
 
     def _from_result(self, result: dict, index: int) -> SemanticMemory:
+        """Deserialise from .get() result (flat lists)."""
         meta = result["metadatas"][index]
         return SemanticMemory(
             content=result["documents"][index],
             id=result["ids"][index],
             embedding=result["embeddings"][index],
+            created_at=datetime.fromisoformat(meta["created_at"]),
+            importance=float(meta["importance"]),
+            source=meta["source"] or None,
+            category=meta["category"],
+            confidence=float(meta["confidence"]),
+            modality=meta["modality"],
+        )
+
+    def _from_query_result(self, result: dict, index: int) -> SemanticMemory:
+        """Deserialise from .query() result (nested lists — one list per query)."""
+        meta = result["metadatas"][0][index]
+        return SemanticMemory(
+            content=result["documents"][0][index],
+            id=result["ids"][0][index],
+            embedding=result["embeddings"][0][index],
             created_at=datetime.fromisoformat(meta["created_at"]),
             importance=float(meta["importance"]),
             source=meta["source"] or None,
