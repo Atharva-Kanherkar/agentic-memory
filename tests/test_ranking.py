@@ -69,6 +69,52 @@ def test_relevance_dominates():
     print(f"         strong: {ranked[0].final_score:.4f}  weak: {ranked[1].final_score:.4f}")
 
 
+def test_single_candidate():
+    """P1 fix: a single result should get recency 1.0, not 0.0."""
+    now = datetime.now(timezone.utc)
+    record = make_record("Only fact", created_at=now - timedelta(days=10))
+    results = [(record, 0.85)]
+
+    ranked = rank_results(results, relevance_weight=0.4, recency_weight=0.3, importance_weight=0.3, now=now)
+    assert ranked[0].recency_score == 1.0, (
+        f"Single candidate should get recency 1.0, got {ranked[0].recency_score}"
+    )
+    print(f"  PASS  single candidate → recency 1.0 (not penalized)")
+    print(f"         score: {ranked[0].final_score:.4f}  recency: {ranked[0].recency_score:.4f}")
+
+
+def test_all_old_candidates():
+    """P1 fix: when all candidates are old, newest still gets 1.0, oldest gets 0.0."""
+    now = datetime.now(timezone.utc)
+    oldest = make_record("Fact A", created_at=now - timedelta(days=365))
+    middle = make_record("Fact B", created_at=now - timedelta(days=200))
+    newest = make_record("Fact C", created_at=now - timedelta(days=100))
+
+    results = [(oldest, 0.80), (middle, 0.80), (newest, 0.80)]
+    ranked = rank_results(results, relevance_weight=0.2, recency_weight=0.6, importance_weight=0.2, now=now)
+
+    # Find each by identity
+    scores = {id(r.record): r for r in ranked}
+    assert scores[id(newest)].recency_score == 1.0, "Newest of old candidates should still get 1.0"
+    assert scores[id(oldest)].recency_score == 0.0, "Oldest should get 0.0"
+    assert 0.0 < scores[id(middle)].recency_score < 1.0, "Middle should be between 0 and 1"
+    print(f"  PASS  all-old candidates → min-max normalization works")
+    print(f"         newest: {scores[id(newest)].recency_score:.4f}  "
+          f"middle: {scores[id(middle)].recency_score:.4f}  "
+          f"oldest: {scores[id(oldest)].recency_score:.4f}")
+
+
+def test_naive_timestamps():
+    """P2 fix: naive datetimes (no tzinfo) should not raise TypeError."""
+    naive_now = datetime(2026, 3, 22, 12, 0, 0)  # no timezone
+    record = make_record("Fact", created_at=datetime(2026, 3, 20, 12, 0, 0))
+
+    results = [(record, 0.85)]
+    ranked = rank_results(results, now=naive_now)
+    assert ranked[0].recency_score == 1.0
+    print(f"  PASS  naive timestamps → no TypeError, handled gracefully")
+
+
 def test_empty():
     ranked = rank_results([])
     assert ranked == []
@@ -80,5 +126,8 @@ if __name__ == "__main__":
     test_recency_weight()
     test_importance_weight()
     test_relevance_dominates()
+    test_single_candidate()
+    test_all_old_candidates()
+    test_naive_timestamps()
     test_empty()
     print("\nAll tests passed.")

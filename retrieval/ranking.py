@@ -28,22 +28,32 @@ def rank_results(
 
     now = now or datetime.now(timezone.utc)
 
-    # ── normalise recency to 0-1 ────────────────────────────────────────
+    # ── normalise recency to 0-1 (min-max over candidate set) ───────────
     # Use last_accessed_at if set, otherwise created_at.
-    # The most recent memory gets 1.0, the oldest gets 0.0.
-    # If all timestamps are identical, everything gets 1.0.
+    # Newest candidate gets 1.0, oldest gets 0.0.
+    # Single candidate or identical timestamps → all get 1.0.
 
     def _timestamp(record: MemoryRecord) -> datetime:
-        return record.last_accessed_at or record.created_at
+        ts = record.last_accessed_at or record.created_at
+        # Normalise naive timestamps to UTC so subtraction never raises
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts
+
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
 
     ages = [(now - _timestamp(r)).total_seconds() for r, _ in results]
+    min_age = min(ages)
     max_age = max(ages)
+    span = max_age - min_age
 
-    if max_age == 0:
+    if span == 0:
+        # Single result, or all timestamps identical — no penalty
         recency_scores = [1.0] * len(results)
     else:
-        # age 0 → recency 1.0, max_age → recency 0.0
-        recency_scores = [1.0 - (age / max_age) for age in ages]
+        # min_age → 1.0 (newest), max_age → 0.0 (oldest)
+        recency_scores = [1.0 - (age - min_age) / span for age in ages]
 
     # ── compute final scores ────────────────────────────────────────────
 
