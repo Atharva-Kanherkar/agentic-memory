@@ -13,7 +13,7 @@ class RankedResult:
     final_score: float
 
 
-MIN_SPAN_SECONDS = 60  # spans shorter than this are treated as "same time"
+MIN_SPAN_SECONDS = 3600  # spans shorter than 1 hour are treated as "same time"
 
 
 def rank_results(
