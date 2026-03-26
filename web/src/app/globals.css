@@ -31,6 +31,7 @@ body {
 body {
   color: var(--text-1);
   font-family: var(--font-body), system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
 }
 
 a {
@@ -47,6 +48,11 @@ textarea {
 
 ::selection {
   background: rgba(255, 255, 255, 0.14);
+}
+
+:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.22);
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar {
@@ -72,14 +78,6 @@ textarea {
   backdrop-filter: blur(12px);
 }
 
-.hero-grid {
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.9), transparent 78%);
-}
-
 .window-dot {
   width: 8px;
   height: 8px;
@@ -90,4 +88,21 @@ textarea {
 .mono-numeric {
   font-family: var(--font-mono), monospace;
   font-variant-numeric: tabular-nums;
+}
+
+input[type="file"]::file-selector-button {
+  margin-right: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-2);
+  padding: 0.48rem 0.8rem;
+  font: inherit;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-1);
+  border-color: rgba(255, 255, 255, 0.14);
 }

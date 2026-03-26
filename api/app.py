@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 from collections import deque
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -41,9 +42,9 @@ def _normalise_origins(origins: list[str] | None = None) -> list[str]:
 
 
 def _jsonable(value: Any) -> Any:
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {key: _jsonable(val) for key, val in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set, frozenset)):
         return [_jsonable(item) for item in value]
     if isinstance(value, datetime):
         return value.isoformat()

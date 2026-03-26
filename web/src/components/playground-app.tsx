@@ -141,15 +141,21 @@ function PrimaryButton({
 function GhostButton({
   children,
   onClick,
+  active = false,
 }: {
   children: React.ReactNode;
   onClick: () => void;
+  active?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="glass-border inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-transparent px-4 text-sm text-[var(--text-2)] transition hover:text-[var(--text-1)]"
+      className={`glass-border inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm transition ${
+        active
+          ? "bg-white/[0.08] text-[var(--text-1)]"
+          : "bg-transparent text-[var(--text-2)] hover:bg-white/[0.03] hover:text-[var(--text-1)]"
+      }`}
     >
       {children}
     </button>
@@ -183,9 +189,9 @@ function RecordTable({
             </thead>
             <tbody>
               {records.map((record) => (
-                <tr key={record.id} className="border-b border-[var(--border)] last:border-b-0">
+                <tr key={record.id} className="border-b border-[var(--border)] transition hover:bg-white/[0.02] last:border-b-0">
                   <td className="py-3 pr-3 align-top">
-                    <div className="font-[family-name:var(--font-body)] text-sm text-[var(--text-1)]">
+                    <div className="font-[family-name:var(--font-body)] text-sm leading-6 text-[var(--text-1)]">
                       {record.content}
                     </div>
                     <div className="mt-1 text-[11px] text-[var(--text-4)]">
@@ -194,7 +200,7 @@ function RecordTable({
                     </div>
                   </td>
                   <td className="px-3 py-3 align-top">{record.memory_type}</td>
-                  <td className="px-3 py-3 align-top">{record.session_id ?? "—"}</td>
+                  <td className="px-3 py-3 align-top break-all">{record.session_id ?? "—"}</td>
                   <td className="px-3 py-3 align-top">{formatDate(record.created_at)}</td>
                   <td className="px-3 py-3 align-top">{record.access_count}x</td>
                 </tr>
@@ -227,9 +233,9 @@ function QueryTable({ results }: { results: RankedQueryResult[] }) {
             </thead>
             <tbody>
               {results.map((result) => (
-                <tr key={result.record.id} className="border-b border-[var(--border)] last:border-b-0">
+                <tr key={result.record.id} className="border-b border-[var(--border)] transition hover:bg-white/[0.02] last:border-b-0">
                   <td className="py-3 pr-3 align-top">
-                    <div className="font-[family-name:var(--font-body)] text-sm text-[var(--text-1)]">
+                    <div className="font-[family-name:var(--font-body)] text-sm leading-6 text-[var(--text-1)]">
                       {result.record.content}
                     </div>
                     <div className="mt-1 text-[11px] text-[var(--text-4)]">
@@ -276,6 +282,10 @@ function EventTable({ events }: { events: PlaygroundEvent[] }) {
       )}
     </WindowPanel>
   );
+}
+
+function MicroCopy({ children }: { children: React.ReactNode }) {
+  return <p className="text-[12px] leading-5 text-[var(--text-4)]">{children}</p>;
 }
 
 function formatDate(value: string) {
@@ -479,19 +489,19 @@ export function PlaygroundApp() {
       </nav>
 
       <section className="relative overflow-hidden px-6 pb-18 pt-24 sm:px-8 lg:px-10">
-        <div className="hero-grid pointer-events-none absolute inset-0" />
         <div className="relative mx-auto max-w-6xl">
           <SectionLabel>Agentic Memory Playground</SectionLabel>
-          <div className="max-w-3xl">
-            <h1 className="font-[family-name:var(--font-display)] text-5xl leading-[1.03] tracking-[-0.03em] text-[var(--text-1)] sm:text-6xl">
+          <div className="max-w-4xl">
+            <h1 className="max-w-3xl font-[family-name:var(--font-display)] text-5xl leading-[1.03] tracking-[-0.03em] text-[var(--text-1)] sm:text-6xl">
               A real workbench for semantic and episodic memory.
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-8 text-[var(--text-2)] sm:text-lg">
               This UI talks to the Python backend directly. Store facts, upload episodic media, query mixed
               retrieval, inspect recent/session/time-range behavior, and watch the event stream the memory system emits.
             </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
+            <div className="mt-10 flex flex-wrap items-center gap-3">
               <StatusBadge>real API mode</StatusBadge>
+              <StatusBadge>chroma-backed</StatusBadge>
               <span className="mono-numeric text-xs text-[var(--text-4)]">
                 NEXT_PUBLIC_MEMORY_API_BASE_URL = {apiBaseUrl}
               </span>
@@ -523,6 +533,7 @@ export function PlaygroundApp() {
                     onChange={(event) => setSemanticContent(event.target.value)}
                   />
                 </FormField>
+                <MicroCopy>Stores a factual memory in the semantic collection and emits `memory.stored`.</MicroCopy>
                 <PrimaryButton type="submit" disabled={busyLabel !== null}>
                   <Database className="size-4" />
                   Store fact
@@ -532,8 +543,8 @@ export function PlaygroundApp() {
 
             <WindowPanel title="store episodic memory" context="text or file-backed">
               <div className="mb-4 flex items-center gap-2">
-                <GhostButton onClick={() => setEpisodeMode("text")}>text episode</GhostButton>
-                <GhostButton onClick={() => setEpisodeMode("file")}>file-backed episode</GhostButton>
+                <GhostButton active={episodeMode === "text"} onClick={() => setEpisodeMode("text")}>text episode</GhostButton>
+                <GhostButton active={episodeMode === "file"} onClick={() => setEpisodeMode("file")}>file-backed episode</GhostButton>
               </div>
               <form className="space-y-4" onSubmit={handleEpisodeSubmit}>
                 <FormField label="Session id">
@@ -595,6 +606,7 @@ export function PlaygroundApp() {
                     onChange={(event) => setEpisodeSummary(event.target.value)}
                   />
                 </FormField>
+                <MicroCopy>Use file-backed mode for image, audio, video, and PDF episodes through the real media path.</MicroCopy>
 
                 <PrimaryButton type="submit" disabled={busyLabel !== null}>
                   <FileUp className="size-4" />
@@ -623,6 +635,9 @@ export function PlaygroundApp() {
                   Search memory
                 </PrimaryButton>
               </form>
+              <div className="mt-4">
+                <MicroCopy>Runs the unified retriever and shows reranked results across semantic and episodic stores.</MicroCopy>
+              </div>
             </WindowPanel>
 
             <WindowPanel title="refresh chrome" context="overview + events">
@@ -707,7 +722,7 @@ export function PlaygroundApp() {
             <div
               className={`glass-border rounded-2xl px-4 py-3 text-sm ${
                 notice.tone === "error"
-                  ? "bg-white/[0.06] text-[var(--accent)]"
+                  ? "bg-white/[0.06] text-[var(--text-1)]"
                   : "bg-white/[0.03] text-[var(--text-2)]"
               }`}
             >

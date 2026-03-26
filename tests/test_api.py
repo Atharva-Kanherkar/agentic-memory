@@ -96,3 +96,23 @@ async def test_events_and_overview_reflect_activity():
     assert overview.json()["semantic_count"] == 1
     assert overview.json()["episodic_count"] == 1
     assert any(event["event_type"] == "memory.accessed" for event in events.json()["events"])
+
+
+@pytest.mark.anyio
+async def test_events_and_overview_serialise_frozen_ranked_payloads():
+    async with make_client() as client:
+        await client.post("/api/memories/semantic", json={"content": "Python uses indentation"})
+        await client.post(
+            "/api/memories/episodic/text",
+            json={"session_id": "session-ranked", "text": "We talked about Python retrieval behavior"},
+        )
+        query = await client.post("/api/retrieval/query", json={"query": "Python", "top_k": 2})
+        overview = await client.get("/api/overview")
+        events = await client.get("/api/events", params={"limit": 10})
+
+    assert query.status_code == 200
+    assert overview.status_code == 200
+    assert events.status_code == 200
+    ranked = next(event for event in events.json()["events"] if event["event_type"] == "memory.ranked")
+    assert isinstance(ranked["data"]["results"], list)
+    assert isinstance(ranked["data"]["weights"], dict)
