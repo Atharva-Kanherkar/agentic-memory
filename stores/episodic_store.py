@@ -25,6 +25,14 @@ _DEFAULT_MIME_TYPES = {
 }
 
 
+class EpisodicStoreError(RuntimeError):
+    """Raised when episodic persistence fails before the record can be stored."""
+
+
+class MediaTooLargeError(EpisodicStoreError):
+    """Raised when a media-backed record exceeds the direct-embedding guardrail."""
+
+
 class EpisodicStore(BaseStore):
     """ChromaDB-backed store for episodic memories."""
 
@@ -32,6 +40,7 @@ class EpisodicStore(BaseStore):
         self,
         event_bus: EventBus | None = None,
         embedder: TextEmbedder | None = None,
+        max_media_bytes: int | None = None,
     ):
         super().__init__(event_bus=event_bus)
         client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
@@ -40,6 +49,9 @@ class EpisodicStore(BaseStore):
             metadata={"hnsw:space": "cosine"},
         )
         self._embedder = embedder or GeminiEmbedder()
+        self._max_media_bytes = (
+            config.MEDIA_EMBED_MAX_BYTES if max_media_bytes is None else max_media_bytes
+        )
 
     def store(self, record: EpisodicMemory) -> str:
         embedding = self._embed_record(record)
@@ -111,11 +123,27 @@ class EpisodicStore(BaseStore):
 
         media_path = Path(record.media_ref)
         if not media_path.exists():
-            raise FileNotFoundError(f"Media file not found: {record.media_ref}")
+            raise EpisodicStoreError(
+                f"Cannot store episodic media record: file not found at {record.media_ref}"
+            )
+
+        size_bytes = media_path.stat().st_size
+        if size_bytes > self._max_media_bytes:
+            raise MediaTooLargeError(
+                "Cannot store episodic media record via direct embedding: "
+                f"modality={record.modality} size_bytes={size_bytes} "
+                f"limit_bytes={self._max_media_bytes} path={record.media_ref}"
+            )
 
         media_bytes = media_path.read_bytes()
         mime_type = record.source_mime_type or _DEFAULT_MIME_TYPES.get(record.modality, "application/octet-stream")
-        return embed_method(media_bytes, mime_type=mime_type)
+        try:
+            return embed_method(media_bytes, mime_type=mime_type)
+        except Exception as exc:
+            raise EpisodicStoreError(
+                "Failed to embed episodic media record: "
+                f"modality={record.modality} path={record.media_ref} mime_type={mime_type}"
+            ) from exc
 
     def _fallback_text(self, record: EpisodicMemory) -> str:
         parts = [record.content]
@@ -191,4 +219,3 @@ class EpisodicStore(BaseStore):
             result["embeddings"][0][index],
             result["metadatas"][0][index],
         )
-

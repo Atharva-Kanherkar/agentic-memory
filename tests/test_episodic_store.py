@@ -9,19 +9,36 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
+from events.bus import EventBus
 from models.episodic import EpisodicMemory
-from stores.episodic_store import EpisodicStore
+from stores.episodic_store import EpisodicStore, EpisodicStoreError, MediaTooLargeError
 from tests.helpers import HashingEmbedder
 
 _TEMP_DIRS = []
 
 
-def fresh_setup():
+class EventRecorder:
+    def __init__(self, bus: EventBus, *event_types: str):
+        self.events = []
+        for event_type in event_types:
+            bus.subscribe(event_type, self.events.append)
+
+
+class FailingMediaEmbedder(HashingEmbedder):
+    def embed_video(self, video_bytes: bytes, mime_type: str = "video/mp4") -> list[float]:
+        raise RuntimeError("provider rejected media payload")
+
+
+def fresh_setup(*, event_bus: EventBus | None = None, embedder=None, max_media_bytes: int | None = None):
     db_path = tempfile.mkdtemp(prefix="chroma_test_episodic_")
     _TEMP_DIRS.append(db_path)
     shutil.rmtree(db_path, ignore_errors=True)
     config.CHROMA_DB_PATH = db_path
-    store = EpisodicStore(embedder=HashingEmbedder())
+    store = EpisodicStore(
+        event_bus=event_bus,
+        embedder=embedder or HashingEmbedder(),
+        max_media_bytes=max_media_bytes,
+    )
     return store, db_path
 
 
@@ -140,6 +157,62 @@ def test_empty_store():
     print("  PASS  empty store queries return clean empty results")
 
 
+def test_oversized_media_fails_before_read_and_does_not_emit_event():
+    bus = EventBus()
+    recorder = EventRecorder(bus, "memory.stored")
+    store, _ = fresh_setup(event_bus=bus, max_media_bytes=8)
+    media_path = make_media_file(".mp4", b"0123456789")
+
+    try:
+        store.store(
+            EpisodicMemory(
+                content="Long video of the debugging session",
+                session_id="session-video",
+                modality="video",
+                media_ref=media_path,
+                source_mime_type="video/mp4",
+            )
+        )
+        raise AssertionError("Expected oversized media to be rejected")
+    except MediaTooLargeError as exc:
+        message = str(exc)
+        assert "size_bytes=10" in message
+        assert "limit_bytes=8" in message
+
+    assert recorder.events == []
+    assert store.retrieve("debugging", top_k=5) == []
+    print("  PASS  oversized media is rejected cleanly before persistence")
+
+
+def test_media_provider_errors_are_wrapped_and_do_not_emit_event():
+    bus = EventBus()
+    recorder = EventRecorder(bus, "memory.stored")
+    store, _ = fresh_setup(event_bus=bus, embedder=FailingMediaEmbedder())
+    media_path = make_media_file(".mp4", b"small-video")
+
+    try:
+        store.store(
+            EpisodicMemory(
+                content="Short video of a failed run",
+                session_id="session-video",
+                modality="video",
+                media_ref=media_path,
+                source_mime_type="video/mp4",
+            )
+        )
+        raise AssertionError("Expected provider failure to be wrapped")
+    except EpisodicStoreError as exc:
+        message = str(exc)
+        assert "Failed to embed episodic media record" in message
+        assert "modality=video" in message
+        assert exc.__cause__ is not None
+        assert str(exc.__cause__) == "provider rejected media payload"
+
+    assert recorder.events == []
+    assert store.retrieve("failed run", top_k=5) == []
+    print("  PASS  provider failures surface as contextual store errors")
+
+
 def cleanup():
     for path in _TEMP_DIRS:
         if os.path.isdir(path):
@@ -160,6 +233,8 @@ if __name__ == "__main__":
         test_retrieval_shape()
         test_access_tracking()
         test_empty_store()
+        test_oversized_media_fails_before_read_and_does_not_emit_event()
+        test_media_provider_errors_are_wrapped_and_do_not_emit_event()
         print("\nAll tests passed.")
     finally:
         cleanup()
