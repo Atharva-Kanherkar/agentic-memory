@@ -1,18 +1,29 @@
 @import "tailwindcss";
 
+/* ------------------------------------------------------------------ */
+/*  Design tokens                                                      */
+/* ------------------------------------------------------------------ */
+
 :root {
   color-scheme: dark;
-  --bg: #060606;
-  --bg-alt: #0b0b0b;
-  --border: rgba(255, 255, 255, 0.08);
-  --text-1: #fafafa;
-  --text-2: rgba(255, 255, 255, 0.62);
-  --text-3: rgba(255, 255, 255, 0.35);
-  --text-4: rgba(255, 255, 255, 0.16);
-  --accent: rgba(255, 255, 255, 0.82);
-  --surface: rgba(255, 255, 255, 0.03);
-  --surface-strong: rgba(255, 255, 255, 0.06);
+  --bg: #080807;
+  --bg-alt: #0e0e0c;
+  --border: rgba(255, 255, 255, 0.07);
+  --text-1: #f2f0eb;
+  --text-2: rgba(255, 255, 255, 0.58);
+  --text-3: rgba(255, 255, 255, 0.32);
+  --text-4: rgba(255, 255, 255, 0.15);
+  --accent: rgba(255, 255, 255, 0.78);
+  --surface: rgba(255, 255, 255, 0.025);
+  --surface-strong: rgba(255, 255, 255, 0.05);
+  --accent-warm: #c4956a;
+  --semantic-clr: #c9a87c;
+  --episodic-clr: #7d9b8a;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Reset & base                                                       */
+/* ------------------------------------------------------------------ */
 
 * {
   box-sizing: border-box;
@@ -22,16 +33,14 @@ html,
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.05), transparent 28%),
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.03), transparent 22%),
-    var(--bg);
+  background: var(--bg);
 }
 
 body {
   color: var(--text-1);
   font-family: var(--font-body), system-ui, sans-serif;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -47,17 +56,21 @@ textarea {
 }
 
 ::selection {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(196, 149, 106, 0.2);
 }
 
 :focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.22);
+  outline: 2px solid rgba(255, 255, 255, 0.18);
   outline-offset: 2px;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Scrollbar                                                          */
+/* ------------------------------------------------------------------ */
+
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -65,24 +78,65 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(237, 233, 225, 0.12);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
 }
+
+/* ------------------------------------------------------------------ */
+/*  App layout                                                         */
+/* ------------------------------------------------------------------ */
+
+.playground-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.playground-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.playground-sidebar {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-alt);
+}
+
+.playground-main {
+  flex: 1;
+}
+
+@media (min-width: 1024px) {
+  .playground-layout {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .playground-body {
+    flex-direction: row;
+    overflow: hidden;
+  }
+
+  .playground-sidebar {
+    width: 380px;
+    flex-shrink: 0;
+    overflow-y: auto;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
+  }
+
+  .playground-main {
+    overflow-y: auto;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Shared primitives                                                  */
+/* ------------------------------------------------------------------ */
 
 .glass-border {
   border: 1px solid var(--border);
-}
-
-.surface-panel {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.02));
-  backdrop-filter: blur(12px);
-}
-
-.window-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--text-4);
 }
 
 .mono-numeric {
@@ -90,19 +144,230 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-input[type="file"]::file-selector-button {
-  margin-right: 0.9rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-2);
-  padding: 0.48rem 0.8rem;
-  font: inherit;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+/* ------------------------------------------------------------------ */
+/*  Type badges                                                        */
+/* ------------------------------------------------------------------ */
+
+.badge-semantic {
+  background: rgba(201, 168, 124, 0.12);
+  color: var(--semantic-clr);
 }
 
-input[type="file"]::file-selector-button:hover {
-  background: rgba(255, 255, 255, 0.08);
+.badge-episodic {
+  background: rgba(125, 155, 138, 0.12);
+  color: var(--episodic-clr);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Score bars                                                         */
+/* ------------------------------------------------------------------ */
+
+.score-bar-default {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.12),
+    rgba(255, 255, 255, 0.22)
+  );
+}
+
+.score-bar-accent {
+  background: linear-gradient(
+    90deg,
+    var(--accent-warm),
+    color-mix(in srgb, var(--accent-warm), white 20%)
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Form elements                                                      */
+/* ------------------------------------------------------------------ */
+
+.field-input {
+  height: 36px;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0 12px;
+  font-size: 13px;
   color: var(--text-1);
-  border-color: rgba(255, 255, 255, 0.14);
+  outline: none;
+  transition: border-color 150ms;
+}
+
+.field-input:focus {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.field-input::placeholder {
+  color: var(--text-4);
+}
+
+.field-textarea {
+  width: 100%;
+  min-height: 80px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-1);
+  outline: none;
+  resize: vertical;
+  transition: border-color 150ms;
+}
+
+.field-textarea:focus {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.field-textarea::placeholder {
+  color: var(--text-4);
+}
+
+.field-select {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0 8px;
+  font-size: 11px;
+  font-family: var(--font-mono), monospace;
+  color: var(--text-2);
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L4 4L7 1' stroke='rgba(255,255,255,0.3)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px;
+}
+
+.field-select:focus {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.field-select option {
+  background: var(--bg-alt);
+  color: var(--text-1);
+}
+
+select.field-input {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='rgba(255,255,255,0.3)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+select.field-input option {
+  background: var(--bg-alt);
+  color: var(--text-1);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Importance slider                                                  */
+/* ------------------------------------------------------------------ */
+
+.importance-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+  cursor: pointer;
+}
+
+.importance-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-warm);
+  cursor: pointer;
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 6px rgba(196, 149, 106, 0.3);
+}
+
+.importance-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-warm);
+  cursor: pointer;
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 6px rgba(196, 149, 106, 0.3);
+}
+
+/* ------------------------------------------------------------------ */
+/*  File drop zone                                                     */
+/* ------------------------------------------------------------------ */
+
+.drop-zone {
+  cursor: pointer;
+  border-radius: 12px;
+  border: 2px dashed var(--border);
+  padding: 20px 16px;
+  transition:
+    border-color 150ms,
+    background 150ms;
+}
+
+.drop-zone:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.drop-zone-active {
+  border-color: var(--accent-warm) !important;
+  background: rgba(196, 149, 106, 0.05);
+}
+
+.drop-zone-filled {
+  border-style: solid;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Query bar sticky background                                        */
+/* ------------------------------------------------------------------ */
+
+.query-bar {
+  background: rgba(8, 8, 7, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Toast animation                                                    */
+/* ------------------------------------------------------------------ */
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-toast {
+  animation: toast-in 200ms ease-out;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reduced motion                                                     */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

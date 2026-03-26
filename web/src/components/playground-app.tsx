@@ -1,9 +1,15 @@
 "use client";
 
-import { FormEvent, useEffect, useEffectEvent, useState } from "react";
 import {
-  ArrowRight,
-  Binary,
+  type DragEvent,
+  type FormEvent,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
+import {
+  ChevronDown,
   Clock3,
   Database,
   FileUp,
@@ -12,9 +18,10 @@ import {
   RefreshCcw,
   Search,
   Signal,
-  TimerReset,
+  Zap,
 } from "lucide-react";
 import {
+  checkHealth,
   createFileEpisode,
   createSemanticMemory,
   createTextEpisode,
@@ -23,274 +30,47 @@ import {
   getRecentEpisodes,
   getSessionEpisodes,
   getTimeRangeEpisodes,
-  MemoryRecord,
-  Overview,
-  PlaygroundEvent,
+  type MemoryRecord,
+  type Overview,
+  type PlaygroundEvent,
   queryMemories,
-  RankedQueryResult,
+  type RankedQueryResult,
 } from "@/lib/api";
 
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
 type Notice = { tone: "ok" | "error"; text: string } | null;
+type SidebarTab = "store" | "explore";
+type StoreMode = "semantic" | "text" | "file";
+type ExploreMode = "recent" | "session" | "time";
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="mb-6 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-4)]">
-      {children}
-    </p>
-  );
-}
+/* ------------------------------------------------------------------ */
+/*  Constants                                                          */
+/* ------------------------------------------------------------------ */
 
-function WindowPanel({
-  title,
-  context,
-  children,
-}: {
-  title: string;
-  context?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="glass-border surface-panel overflow-hidden rounded-[18px]">
-      <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <span className="window-dot" />
-            <span className="window-dot" />
-            <span className="window-dot" />
-          </div>
-          <span className="mono-numeric text-xs text-[var(--text-3)]">{title}</span>
-        </div>
-        {context ? <span className="mono-numeric text-[11px] text-[var(--text-4)]">{context}</span> : null}
-      </header>
-      <div className="p-4 sm:p-5">{children}</div>
-    </section>
-  );
-}
+const EXAMPLE_FACTS = [
+  { content: "The capital of France is Paris", category: "fact" },
+  { content: "Transformers use self-attention to process sequences in parallel", category: "definition" },
+  { content: "Python was created by Guido van Rossum and first released in 1991", category: "fact" },
+];
 
-function StatusBadge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="mono-numeric inline-flex items-center rounded-[6px] bg-white/[0.06] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)]">
-      {children}
-    </span>
-  );
-}
+const EXAMPLE_EPISODES = [
+  { content: "We debugged a retrieval bug where recency scores were inverted", session: "session-debug-01" },
+  { content: "User asked about multimodal embeddings and we walked through the Gemini pipeline", session: "session-onboard-01" },
+];
 
-function StatTile({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: React.ReactNode;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="glass-border surface-panel rounded-2xl p-4">
-      <div className="mb-4 flex items-center justify-between text-[var(--text-3)]">
-        {icon}
-        <span className="text-[11px] uppercase tracking-[0.14em]">{label}</span>
-      </div>
-      <div className="mono-numeric text-3xl text-[var(--text-1)]">{value}</div>
-    </div>
-  );
-}
+const SUGGESTED_QUERIES = ["capital city", "attention mechanism", "debug session", "embedding pipeline"];
 
-function FormField({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-sm text-[var(--text-3)]">{label}</span>
-      {children}
-    </label>
-  );
-}
+const CATEGORIES = ["general", "fact", "definition", "relationship", "preference", "procedure"];
 
-function textInputClass() {
-  return "glass-border h-11 w-full rounded-xl bg-white/[0.02] px-4 text-sm text-[var(--text-1)] outline-none transition-colors placeholder:text-[var(--text-4)] focus:border-white/[0.2]";
-}
-
-function textareaClass() {
-  return "glass-border min-h-[108px] w-full rounded-xl bg-white/[0.02] px-4 py-3 text-sm text-[var(--text-1)] outline-none transition-colors placeholder:text-[var(--text-4)] focus:border-white/[0.2]";
-}
-
-function PrimaryButton({
-  children,
-  disabled,
-  type = "button",
-}: {
-  children: React.ReactNode;
-  disabled?: boolean;
-  type?: "button" | "submit";
-}) {
-  return (
-    <button
-      type={type}
-      disabled={disabled}
-      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--text-1)] px-5 text-sm font-medium text-[var(--bg)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {children}
-    </button>
-  );
-}
-
-function GhostButton({
-  children,
-  onClick,
-  active = false,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  active?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`glass-border inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm transition ${
-        active
-          ? "bg-white/[0.08] text-[var(--text-1)]"
-          : "bg-transparent text-[var(--text-2)] hover:bg-white/[0.03] hover:text-[var(--text-1)]"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function RecordTable({
-  title,
-  records,
-  emptyText,
-}: {
-  title: string;
-  records: MemoryRecord[];
-  emptyText: string;
-}) {
-  return (
-    <WindowPanel title={title} context={`${records.length} rows`}>
-      {records.length === 0 ? (
-        <p className="text-sm text-[var(--text-3)]">{emptyText}</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left mono-numeric text-[13px] text-[var(--text-2)]">
-            <thead>
-              <tr className="border-b border-[var(--border)] text-[11px] uppercase tracking-[0.12em] text-[var(--text-4)]">
-                <th className="px-0 py-3 font-medium">Memory</th>
-                <th className="px-3 py-3 font-medium">Type</th>
-                <th className="px-3 py-3 font-medium">Session</th>
-                <th className="px-3 py-3 font-medium">Stored</th>
-                <th className="px-3 py-3 font-medium">Accessed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((record) => (
-                <tr key={record.id} className="border-b border-[var(--border)] transition hover:bg-white/[0.02] last:border-b-0">
-                  <td className="py-3 pr-3 align-top">
-                    <div className="font-[family-name:var(--font-body)] text-sm leading-6 text-[var(--text-1)]">
-                      {record.content}
-                    </div>
-                    <div className="mt-1 text-[11px] text-[var(--text-4)]">
-                      {record.modality}
-                      {record.media_ref ? ` · ${shortMediaRef(record.media_ref)}` : ""}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 align-top">{record.memory_type}</td>
-                  <td className="px-3 py-3 align-top break-all">{record.session_id ?? "—"}</td>
-                  <td className="px-3 py-3 align-top">{formatDate(record.created_at)}</td>
-                  <td className="px-3 py-3 align-top">{record.access_count}x</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </WindowPanel>
-  );
-}
-
-function QueryTable({ results }: { results: RankedQueryResult[] }) {
-  return (
-    <WindowPanel title="mixed query results" context={`${results.length} hits`}>
-      {results.length === 0 ? (
-        <p className="text-sm text-[var(--text-3)]">Run a search to compare semantic and episodic results together.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse mono-numeric text-[13px] text-[var(--text-2)]">
-            <thead>
-              <tr className="border-b border-[var(--border)] text-[11px] uppercase tracking-[0.12em] text-[var(--text-4)]">
-                <th className="px-0 py-3 text-left font-medium">Memory</th>
-                <th className="px-3 py-3 text-left font-medium">Type</th>
-                <th className="px-3 py-3 text-right font-medium">Final</th>
-                <th className="px-3 py-3 text-right font-medium">Raw</th>
-                <th className="px-3 py-3 text-right font-medium">Recency</th>
-                <th className="px-3 py-3 text-right font-medium">Importance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((result) => (
-                <tr key={result.record.id} className="border-b border-[var(--border)] transition hover:bg-white/[0.02] last:border-b-0">
-                  <td className="py-3 pr-3 align-top">
-                    <div className="font-[family-name:var(--font-body)] text-sm leading-6 text-[var(--text-1)]">
-                      {result.record.content}
-                    </div>
-                    <div className="mt-1 text-[11px] text-[var(--text-4)]">
-                      {result.record.modality}
-                      {result.record.session_id ? ` · ${result.record.session_id}` : ""}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 align-top">{result.record.memory_type}</td>
-                  <td className="px-3 py-3 text-right">{result.final_score.toFixed(4)}</td>
-                  <td className="px-3 py-3 text-right">{result.raw_similarity.toFixed(4)}</td>
-                  <td className="px-3 py-3 text-right">{result.recency_score.toFixed(4)}</td>
-                  <td className="px-3 py-3 text-right">{result.importance_score.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </WindowPanel>
-  );
-}
-
-function EventTable({ events }: { events: PlaygroundEvent[] }) {
-  return (
-    <WindowPanel title="event stream" context={`${events.length} latest`}>
-      {events.length === 0 ? (
-        <p className="text-sm text-[var(--text-3)]">No events yet. The stream will populate as the playground interacts with the API.</p>
-      ) : (
-        <div className="space-y-3">
-          {events.map((event) => (
-            <div key={`${event.timestamp}-${event.event_type}`} className="glass-border rounded-2xl bg-[var(--surface)] p-4">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <StatusBadge>{event.event_type}</StatusBadge>
-                  <span className="mono-numeric text-[11px] text-[var(--text-4)]">{formatDate(event.timestamp)}</span>
-                </div>
-              </div>
-              <pre className="mono-numeric overflow-x-auto whitespace-pre-wrap text-[12px] leading-6 text-[var(--text-3)]">
-                {JSON.stringify(event.data, null, 2)}
-              </pre>
-            </div>
-          ))}
-        </div>
-      )}
-    </WindowPanel>
-  );
-}
-
-function MicroCopy({ children }: { children: React.ReactNode }) {
-  return <p className="text-[12px] leading-5 text-[var(--text-4)]">{children}</p>;
-}
+/* ------------------------------------------------------------------ */
+/*  Utilities                                                          */
+/* ------------------------------------------------------------------ */
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString([], {
-    year: "numeric",
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -303,444 +83,1146 @@ function shortMediaRef(value: string) {
 }
 
 function initialTimeInput(offsetMinutes: number) {
-  const date = new Date(Date.now() + offsetMinutes * 60_000);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  const d = new Date(Date.now() + offsetMinutes * 60_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function PlaygroundApp() {
-  const apiBaseUrl = process.env.NEXT_PUBLIC_MEMORY_API_BASE_URL ?? "http://localhost:8000";
-  const apiDocsUrl = `${apiBaseUrl.replace(/\/$/, "")}/docs`;
+/* ------------------------------------------------------------------ */
+/*  Micro-components                                                   */
+/* ------------------------------------------------------------------ */
 
+function HealthDot({ status }: { status: "checking" | "ok" | "error" }) {
+  const color =
+    status === "ok" ? "bg-emerald-400" : status === "error" ? "bg-red-400" : "bg-amber-400";
+  return (
+    <span className="relative flex size-2" title={`API ${status}`}>
+      {status === "ok" && (
+        <span
+          className={`absolute inline-flex size-full animate-ping rounded-full ${color} opacity-40`}
+        />
+      )}
+      <span className={`relative inline-flex size-2 rounded-full ${color}`} />
+    </span>
+  );
+}
+
+function TypeBadge({ type }: { type: string }) {
+  const cls = type === "semantic" ? "badge-semantic" : "badge-episodic";
+  return (
+    <span
+      className={`${cls} inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider`}
+    >
+      {type}
+    </span>
+  );
+}
+
+function ScoreBar({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: number;
+  accent?: boolean;
+}) {
+  const pct = Math.min(100, Math.max(0, value * 100));
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-[72px] text-[10px] uppercase tracking-wider text-[var(--text-4)]">
+        {label}
+      </span>
+      <div className="h-[5px] flex-1 overflow-hidden rounded-full bg-white/[0.06]">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${accent ? "score-bar-accent" : "score-bar-default"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="mono-numeric w-11 text-right text-[11px] text-[var(--text-3)]">
+        {value.toFixed(3)}
+      </span>
+    </div>
+  );
+}
+
+function FormLabel({ children }: { children: React.ReactNode }) {
+  return <span className="mb-1.5 block text-[12px] text-[var(--text-3)]">{children}</span>;
+}
+
+function FieldInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={`field-input ${props.className ?? ""}`} />;
+}
+
+function FieldTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea {...props} className={`field-textarea ${props.className ?? ""}`} />;
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider transition ${
+        active
+          ? "bg-white/[0.08] text-[var(--text-1)]"
+          : "text-[var(--text-4)] hover:bg-white/[0.03] hover:text-[var(--text-2)]"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SubmitButton({
+  children,
+  disabled,
+  small = false,
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  small?: boolean;
+}) {
+  return (
+    <button
+      type="submit"
+      disabled={disabled}
+      className={`inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--text-1)] font-medium text-[var(--bg)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 ${
+        small ? "h-9 px-3.5 text-[12px]" : "h-10 px-4 text-sm"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ImportanceSlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <FormLabel>Importance</FormLabel>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          className="importance-slider flex-1"
+        />
+        <span className="mono-numeric w-9 text-right text-[11px] text-[var(--text-3)]">
+          {value.toFixed(2)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  File drop zone                                                     */
+/* ------------------------------------------------------------------ */
+
+function FileDropZone({
+  file,
+  onFile,
+}: {
+  file: File | null;
+  onFile: (f: File | null) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function onDragOver(e: DragEvent) {
+    e.preventDefault();
+  }
+  function onDragEnter(e: DragEvent) {
+    e.preventDefault();
+    setDragging(true);
+  }
+  function onDragLeave(e: DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+  }
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) onFile(f);
+  }
+
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onClick={() => inputRef.current?.click()}
+      className={`drop-zone ${dragging ? "drop-zone-active" : ""} ${file ? "drop-zone-filled" : ""}`}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+      />
+      {file ? (
+        <div className="space-y-1 text-center">
+          <p className="max-w-full truncate text-[13px] text-[var(--text-1)]">{file.name}</p>
+          <p className="text-[11px] text-[var(--text-4)]">
+            {(file.size / 1024 / 1024).toFixed(2)} MB
+            {file.size > 20 * 1024 * 1024 && (
+              <span className="ml-1 text-red-400">exceeds 20 MB limit</span>
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onFile(null);
+            }}
+            className="text-[11px] text-[var(--text-3)] underline underline-offset-2 hover:text-[var(--text-1)]"
+          >
+            Remove
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-1.5 text-center">
+          <FileUp className="mx-auto size-5 text-[var(--text-4)]" />
+          <p className="text-[12px] text-[var(--text-3)]">Drop file or click to browse</p>
+          <p className="text-[10px] text-[var(--text-4)]">Image, audio, video, or PDF · max 20 MB</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Result cards                                                       */
+/* ------------------------------------------------------------------ */
+
+function ResultCard({ result }: { result: RankedQueryResult }) {
+  const { record } = result;
+  return (
+    <div className="glass-border space-y-3 rounded-2xl bg-[var(--surface)] p-5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="flex-1 text-sm leading-relaxed text-[var(--text-1)]">{record.content}</p>
+        <TypeBadge type={record.memory_type} />
+      </div>
+      {record.summary && (
+        <p className="text-[12px] italic leading-5 text-[var(--text-3)]">{record.summary}</p>
+      )}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--text-4)]">
+        <span>{record.modality}</span>
+        {record.session_id && (
+          <>
+            <span>·</span>
+            <span>{record.session_id}</span>
+          </>
+        )}
+        {record.media_ref && (
+          <>
+            <span>·</span>
+            <span>{shortMediaRef(record.media_ref)}</span>
+          </>
+        )}
+        <span>·</span>
+        <span>{formatDate(record.created_at)}</span>
+        <span>·</span>
+        <span>{record.access_count}× accessed</span>
+      </div>
+      <div className="space-y-1.5 pt-1">
+        <ScoreBar label="relevance" value={result.raw_similarity} />
+        <ScoreBar label="recency" value={result.recency_score} />
+        <ScoreBar label="importance" value={result.importance_score} />
+        <div className="mt-1.5 border-t border-[var(--border)] pt-1.5">
+          <ScoreBar label="final" value={result.final_score} accent />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MemoryCard({ record }: { record: MemoryRecord }) {
+  return (
+    <div className="glass-border rounded-xl bg-[var(--surface)] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="flex-1 text-sm leading-relaxed text-[var(--text-1)]">{record.content}</p>
+        <TypeBadge type={record.memory_type} />
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--text-4)]">
+        <span>{record.modality}</span>
+        {record.session_id && (
+          <>
+            <span>·</span>
+            <span>{record.session_id}</span>
+          </>
+        )}
+        {record.turn_number != null && (
+          <>
+            <span>·</span>
+            <span>turn {record.turn_number}</span>
+          </>
+        )}
+        <span>·</span>
+        <span>{formatDate(record.created_at)}</span>
+        <span>·</span>
+        <span>{record.access_count}× accessed</span>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Event drawer                                                       */
+/* ------------------------------------------------------------------ */
+
+function EventDrawer({
+  events,
+  open,
+  onToggle,
+}: {
+  events: PlaygroundEvent[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-alt)]">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex h-10 w-full items-center justify-between px-5 text-[11px] uppercase tracking-wider text-[var(--text-4)] transition hover:text-[var(--text-3)]"
+      >
+        <span className="flex items-center gap-2">
+          <Signal className="size-3" />
+          Event stream
+          <span className="mono-numeric rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px]">
+            {events.length}
+          </span>
+        </span>
+        <ChevronDown
+          className={`size-3.5 transition-transform ${open ? "" : "rotate-180"}`}
+        />
+      </button>
+      {open && (
+        <div className="max-h-[280px] overflow-y-auto px-5 pb-4">
+          {events.length === 0 ? (
+            <p className="text-[12px] text-[var(--text-4)]">
+              Events will appear here as you interact with the API.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {events.map((ev, i) => (
+                <div key={`${ev.timestamp}-${i}`} className="flex gap-3 text-[11px]">
+                  <span className="mono-numeric shrink-0 text-[var(--text-4)]">
+                    {formatDate(ev.timestamp)}
+                  </span>
+                  <span
+                    className={`shrink-0 font-medium ${
+                      ev.event_type === "memory.stored"
+                        ? "text-emerald-400/70"
+                        : ev.event_type === "memory.retrieved"
+                          ? "text-amber-400/70"
+                          : ev.event_type === "memory.ranked"
+                            ? "text-sky-400/70"
+                            : "text-[var(--text-3)]"
+                    }`}
+                  >
+                    {ev.event_type}
+                  </span>
+                  <span className="mono-numeric truncate text-[var(--text-4)]">
+                    {JSON.stringify(ev.data)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main component                                                     */
+/* ------------------------------------------------------------------ */
+
+export function PlaygroundApp() {
+  const apiBaseUrl =
+    process.env.NEXT_PUBLIC_MEMORY_API_BASE_URL ?? "http://localhost:8000";
+
+  /* ---- health ---- */
+  const [apiHealth, setApiHealth] = useState<"checking" | "ok" | "error">("checking");
+
+  /* ---- overview ---- */
   const [overview, setOverview] = useState<Overview | null>(null);
   const [events, setEvents] = useState<PlaygroundEvent[]>([]);
-  const [queryResults, setQueryResults] = useState<RankedQueryResult[]>([]);
-  const [recentRecords, setRecentRecords] = useState<MemoryRecord[]>([]);
-  const [sessionRecords, setSessionRecords] = useState<MemoryRecord[]>([]);
-  const [timeRecords, setTimeRecords] = useState<MemoryRecord[]>([]);
+  const [eventsOpen, setEventsOpen] = useState(false);
+
+  /* ---- UI ---- */
   const [notice, setNotice] = useState<Notice>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("store");
+  const [storeMode, setStoreMode] = useState<StoreMode>("semantic");
+  const [exploreMode, setExploreMode] = useState<ExploreMode>("recent");
 
-  const [semanticContent, setSemanticContent] = useState("");
-  const [episodeMode, setEpisodeMode] = useState<"text" | "file">("text");
-  const [episodeSession, setEpisodeSession] = useState("session-playground");
-  const [episodeText, setEpisodeText] = useState("");
-  const [episodeContent, setEpisodeContent] = useState("");
-  const [episodeSummary, setEpisodeSummary] = useState("");
-  const [episodeFile, setEpisodeFile] = useState<File | null>(null);
-  const [queryText, setQueryText] = useState("retrieval");
+  /* ---- semantic form ---- */
+  const [semContent, setSemContent] = useState("");
+  const [semImportance, setSemImportance] = useState(0.5);
+  const [semCategory, setSemCategory] = useState("general");
+  const [semConfidence, setSemConfidence] = useState(1.0);
+
+  /* ---- episodic (shared) ---- */
+  const [epiSession, setEpiSession] = useState("session-playground");
+  const [epiImportance, setEpiImportance] = useState(0.5);
+  const [epiSummary, setEpiSummary] = useState("");
+
+  /* ---- episodic text ---- */
+  const [epiText, setEpiText] = useState("");
+  const [epiTurn, setEpiTurn] = useState("");
+
+  /* ---- episodic file ---- */
+  const [epiFile, setEpiFile] = useState<File | null>(null);
+  const [epiFileContent, setEpiFileContent] = useState("");
+
+  /* ---- query ---- */
+  const [queryText, setQueryText] = useState("");
+  const [topK, setTopK] = useState(6);
+  const [queryTypeFilter, setQueryTypeFilter] = useState<"all" | "semantic" | "episodic">("all");
+  const [queryResults, setQueryResults] = useState<RankedQueryResult[]>([]);
+  const [querySubmitted, setQuerySubmitted] = useState(false);
+
+  /* ---- explore ---- */
   const [recentCount, setRecentCount] = useState("5");
   const [sessionFilter, setSessionFilter] = useState("session-playground");
   const [timeStart, setTimeStart] = useState(initialTimeInput(-120));
   const [timeEnd, setTimeEnd] = useState(initialTimeInput(0));
+  const [exploreRecords, setExploreRecords] = useState<MemoryRecord[]>([]);
+  const [exploreLabel, setExploreLabel] = useState("");
 
-  const loadInitialData = useEffectEvent(async () => {
-    await refreshChrome();
-    await runRecent(5, true);
+  /* ================================================================ */
+  /*  Effects                                                          */
+  /* ================================================================ */
+
+  useEffect(() => {
+    checkHealth()
+      .then((ok) => setApiHealth(ok ? "ok" : "error"))
+      .catch(() => setApiHealth("error"));
+  }, [apiBaseUrl]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  const loadInitial = useEffectEvent(async () => {
+    await refreshData();
   });
 
   useEffect(() => {
-    void loadInitialData();
+    void loadInitial();
   }, []);
 
-  async function refreshChrome() {
+  /* ================================================================ */
+  /*  Helpers                                                          */
+  /* ================================================================ */
+
+  async function refreshData() {
     try {
-      const [nextOverview, nextEvents] = await Promise.all([getOverview(), getEvents(30)]);
-      setOverview(nextOverview);
-      setEvents(nextEvents.events);
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        text: error instanceof Error ? error.message : "Could not reach the memory API.",
-      });
+      const [ov, ev] = await Promise.all([getOverview(), getEvents(40)]);
+      setOverview(ov);
+      setEvents(ev.events);
+    } catch {
+      /* silent */
     }
   }
 
-  async function withBusy<T>(label: string, work: () => Promise<T>) {
+  async function withBusy<T>(label: string, work: () => Promise<T>): Promise<T | null> {
     setBusyLabel(label);
     setNotice(null);
     try {
       const result = await work();
-      await refreshChrome();
+      await refreshData();
       return result;
     } catch (error) {
       setNotice({
         tone: "error",
         text: error instanceof Error ? error.message : "Request failed.",
       });
-      throw error;
+      return null;
     } finally {
       setBusyLabel(null);
     }
   }
 
-  async function handleSemanticSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!semanticContent.trim()) return;
-    try {
-      const result = await withBusy("Storing semantic memory", () =>
-        createSemanticMemory({ content: semanticContent.trim() }),
-      );
-      setSemanticContent("");
-      setNotice({ tone: "ok", text: `Stored semantic memory ${result.record.id.slice(0, 8)}.` });
-    } catch {}
+  const isBusy = busyLabel !== null;
+
+  /* ================================================================ */
+  /*  Store handlers                                                   */
+  /* ================================================================ */
+
+  async function handleStoreSemantic(e: FormEvent) {
+    e.preventDefault();
+    if (!semContent.trim()) return;
+    const result = await withBusy("Storing fact", () =>
+      createSemanticMemory({
+        content: semContent.trim(),
+        importance: semImportance,
+        category: semCategory,
+        confidence: semConfidence,
+      }),
+    );
+    if (result) {
+      setSemContent("");
+      setNotice({ tone: "ok", text: `Stored semantic memory ${result.record.id.slice(0, 8)}` });
+    }
   }
 
-  async function handleEpisodeSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!episodeSession.trim()) return;
-
-    try {
-      if (episodeMode === "text") {
-        if (!episodeText.trim()) return;
-        const result = await withBusy("Storing text episode", () =>
-          createTextEpisode({
-            session_id: episodeSession.trim(),
-            text: episodeText.trim(),
-            summary: episodeSummary.trim() || undefined,
-          }),
-        );
-        setEpisodeText("");
-        setEpisodeSummary("");
-        setNotice({ tone: "ok", text: `Stored episode ${result.record.id.slice(0, 8)}.` });
-      } else {
-        if (!episodeFile) return;
-        const result = await withBusy("Uploading file-backed episode", () =>
-          createFileEpisode({
-            session_id: episodeSession.trim(),
-            file: episodeFile,
-            content: episodeContent.trim() || undefined,
-            summary: episodeSummary.trim() || undefined,
-          }),
-        );
-        setEpisodeFile(null);
-        setEpisodeContent("");
-        setEpisodeSummary("");
-        setNotice({ tone: "ok", text: `Stored file-backed episode ${result.record.id.slice(0, 8)}.` });
-      }
-    } catch {}
+  async function handleStoreTextEpisode(e: FormEvent) {
+    e.preventDefault();
+    if (!epiText.trim() || !epiSession.trim()) return;
+    const result = await withBusy("Storing episode", () =>
+      createTextEpisode({
+        session_id: epiSession.trim(),
+        text: epiText.trim(),
+        summary: epiSummary.trim() || undefined,
+        turn_number: epiTurn ? parseInt(epiTurn, 10) : undefined,
+        importance: epiImportance,
+      }),
+    );
+    if (result) {
+      setEpiText("");
+      setEpiSummary("");
+      setEpiTurn("");
+      setNotice({ tone: "ok", text: `Stored episode ${result.record.id.slice(0, 8)}` });
+    }
   }
 
-  async function handleQuerySubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!queryText.trim()) return;
-    try {
-      const result = await withBusy("Running mixed query", () =>
-        queryMemories({ query: queryText.trim(), top_k: 6 }),
-      );
+  async function handleStoreFileEpisode(e: FormEvent) {
+    e.preventDefault();
+    if (!epiFile || !epiSession.trim()) return;
+    const result = await withBusy("Uploading episode", () =>
+      createFileEpisode({
+        session_id: epiSession.trim(),
+        file: epiFile,
+        content: epiFileContent.trim() || undefined,
+        summary: epiSummary.trim() || undefined,
+        importance: epiImportance,
+      }),
+    );
+    if (result) {
+      setEpiFile(null);
+      setEpiFileContent("");
+      setEpiSummary("");
+      setNotice({ tone: "ok", text: `Stored file episode ${result.record.id.slice(0, 8)}` });
+    }
+  }
+
+  async function storeExampleFact(content: string, category: string) {
+    const result = await withBusy("Storing example", () =>
+      createSemanticMemory({ content, category }),
+    );
+    if (result) setNotice({ tone: "ok", text: "Stored example fact" });
+  }
+
+  async function storeExampleEpisode(content: string, session: string) {
+    const result = await withBusy("Storing example", () =>
+      createTextEpisode({ session_id: session, text: content }),
+    );
+    if (result) setNotice({ tone: "ok", text: "Stored example episode" });
+  }
+
+  /* ================================================================ */
+  /*  Query handlers                                                   */
+  /* ================================================================ */
+
+  async function runQuery(text: string) {
+    if (!text.trim()) return;
+    const result = await withBusy("Searching", () =>
+      queryMemories({
+        query: text.trim(),
+        top_k: topK,
+        memory_types: queryTypeFilter === "all" ? undefined : [queryTypeFilter],
+      }),
+    );
+    if (result) {
       setQueryResults(result.results);
-      setNotice({ tone: "ok", text: `Returned ${result.results.length} mixed memory hits.` });
-    } catch {}
+      setQuerySubmitted(true);
+      setNotice({ tone: "ok", text: `${result.results.length} results` });
+    }
   }
 
-  async function runRecent(count: number, silent = false) {
-    try {
-      const result = await withBusy("Loading recent episodes", () => getRecentEpisodes(count));
-      setRecentRecords(result.records);
-      if (!silent) {
-        setNotice({ tone: "ok", text: `Loaded ${result.records.length} recent episodic memories.` });
-      }
-    } catch {}
+  function handleQuery(e?: FormEvent) {
+    e?.preventDefault();
+    void runQuery(queryText);
   }
 
-  async function handleRecentSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const parsed = Math.max(1, Number.parseInt(recentCount, 10) || 5);
-    await runRecent(parsed);
+  /* ================================================================ */
+  /*  Explore handlers                                                 */
+  /* ================================================================ */
+
+  async function handleRecent(e: FormEvent) {
+    e.preventDefault();
+    const n = Math.max(1, parseInt(recentCount, 10) || 5);
+    const result = await withBusy("Loading recent", () => getRecentEpisodes(n));
+    if (result) {
+      setExploreRecords(result.records);
+      setExploreLabel(`${result.records.length} recent episodes`);
+    }
   }
 
-  async function handleSessionSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleSession(e: FormEvent) {
+    e.preventDefault();
     if (!sessionFilter.trim()) return;
-    try {
-      const result = await withBusy("Loading session timeline", () =>
-        getSessionEpisodes(sessionFilter.trim()),
-      );
-      setSessionRecords(result.records);
-      setNotice({ tone: "ok", text: `Loaded ${result.records.length} records for ${sessionFilter.trim()}.` });
-    } catch {}
+    const result = await withBusy("Loading session", () =>
+      getSessionEpisodes(sessionFilter.trim()),
+    );
+    if (result) {
+      setExploreRecords(result.records);
+      setExploreLabel(`${result.records.length} episodes in ${sessionFilter.trim()}`);
+    }
   }
 
-  async function handleTimeRangeSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleTimeRange(e: FormEvent) {
+    e.preventDefault();
     if (!timeStart || !timeEnd) return;
-    try {
-      const result = await withBusy("Loading time window", () =>
-        getTimeRangeEpisodes(new Date(timeStart).toISOString(), new Date(timeEnd).toISOString()),
-      );
-      setTimeRecords(result.records);
-      setNotice({ tone: "ok", text: `Loaded ${result.records.length} episodic memories in range.` });
-    } catch {}
+    const result = await withBusy("Loading range", () =>
+      getTimeRangeEpisodes(new Date(timeStart).toISOString(), new Date(timeEnd).toISOString()),
+    );
+    if (result) {
+      setExploreRecords(result.records);
+      setExploreLabel(`${result.records.length} episodes in range`);
+    }
   }
+
+  /* ================================================================ */
+  /*  Render                                                           */
+  /* ================================================================ */
 
   return (
-    <main className="pb-24">
-      <nav className="fixed top-0 right-0 z-50 p-4">
-        <a
-          href="https://github.com/agentclash/agentic-memory"
-          target="_blank"
-          rel="noreferrer"
-          className="glass-border inline-flex items-center gap-2 rounded-xl bg-white/[0.03] px-3 py-2 text-xs text-[var(--text-3)] transition hover:text-[var(--text-1)]"
+    <div className="playground-layout">
+      {/* ---- Toast ---- */}
+      {notice && (
+        <div
+          className={`animate-toast fixed right-4 top-4 z-50 max-w-sm rounded-xl px-4 py-2.5 text-[13px] shadow-2xl backdrop-blur-md ${
+            notice.tone === "error"
+              ? "border border-red-500/20 bg-red-500/10 text-red-300"
+              : "border border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+          }`}
         >
-          <Layers3 className="size-3.5" />
-          View repository
-        </a>
-      </nav>
+          {notice.text}
+        </div>
+      )}
 
-      <section className="relative overflow-hidden px-6 pb-18 pt-24 sm:px-8 lg:px-10">
-        <div className="relative mx-auto max-w-6xl">
-          <SectionLabel>Agentic Memory Playground</SectionLabel>
-          <div className="max-w-4xl">
-            <h1 className="max-w-3xl font-[family-name:var(--font-display)] text-5xl leading-[1.03] tracking-[-0.03em] text-[var(--text-1)] sm:text-6xl">
-              A real workbench for semantic and episodic memory.
-            </h1>
-            <p className="mt-6 max-w-2xl text-base leading-8 text-[var(--text-2)] sm:text-lg">
-              This UI talks to the Python backend directly. Store facts, upload episodic media, query mixed
-              retrieval, inspect recent/session/time-range behavior, and watch the event stream the memory system emits.
-            </p>
-            <div className="mt-10 flex flex-wrap items-center gap-3">
-              <StatusBadge>real API mode</StatusBadge>
-              <StatusBadge>chroma-backed</StatusBadge>
-              <span className="mono-numeric text-xs text-[var(--text-4)]">
-                NEXT_PUBLIC_MEMORY_API_BASE_URL = {apiBaseUrl}
+      {/* ---- Header ---- */}
+      <header className="flex h-[52px] shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--bg-alt)] px-5">
+        <div className="flex items-center gap-3">
+          <HealthDot status={apiHealth} />
+          <span className="font-[family-name:var(--font-display)] text-lg text-[var(--text-1)]">
+            Memory Playground
+          </span>
+        </div>
+        <div className="flex items-center gap-5">
+          <div className="mono-numeric hidden items-center gap-4 text-[11px] text-[var(--text-4)] sm:flex">
+            <span>
+              sem{" "}
+              <span className="text-[var(--text-2)]">{overview?.semantic_count ?? "—"}</span>
+            </span>
+            <span>
+              epi{" "}
+              <span className="text-[var(--text-2)]">{overview?.episodic_count ?? "—"}</span>
+            </span>
+            <span>
+              sess{" "}
+              <span className="text-[var(--text-2)]">
+                {overview?.recent_sessions.length ?? "—"}
               </span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-6 sm:px-8 lg:px-10">
-        <div className="mx-auto grid max-w-6xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatTile label="Semantic Memories" value={overview?.semantic_count ?? "—"} icon={<Database className="size-4" />} />
-          <StatTile label="Episodic Memories" value={overview?.episodic_count ?? "—"} icon={<History className="size-4" />} />
-          <StatTile label="Tracked Sessions" value={overview?.recent_sessions.length ?? "—"} icon={<Clock3 className="size-4" />} />
-          <StatTile label="Live Event Buffer" value={events.length} icon={<Signal className="size-4" />} />
-        </div>
-      </section>
-
-      <section className="px-6 pt-12 sm:px-8 lg:px-10">
-        <div className="mx-auto max-w-6xl">
-          <SectionLabel>Workbench</SectionLabel>
-          <div className="grid gap-4 lg:grid-cols-[1.05fr_1fr]">
-            <WindowPanel title="store semantic memory" context="fact ingestion">
-              <form className="space-y-4" onSubmit={handleSemanticSubmit}>
-                <FormField label="Semantic fact">
-                  <textarea
-                    className={textareaClass()}
-                    placeholder="The capital of France is Paris."
-                    value={semanticContent}
-                    onChange={(event) => setSemanticContent(event.target.value)}
-                  />
-                </FormField>
-                <MicroCopy>Stores a factual memory in the semantic collection and emits `memory.stored`.</MicroCopy>
-                <PrimaryButton type="submit" disabled={busyLabel !== null}>
-                  <Database className="size-4" />
-                  Store fact
-                </PrimaryButton>
-              </form>
-            </WindowPanel>
-
-            <WindowPanel title="store episodic memory" context="text or file-backed">
-              <div className="mb-4 flex items-center gap-2">
-                <GhostButton active={episodeMode === "text"} onClick={() => setEpisodeMode("text")}>text episode</GhostButton>
-                <GhostButton active={episodeMode === "file"} onClick={() => setEpisodeMode("file")}>file-backed episode</GhostButton>
-              </div>
-              <form className="space-y-4" onSubmit={handleEpisodeSubmit}>
-                <FormField label="Session id">
-                  <input
-                    className={textInputClass()}
-                    value={episodeSession}
-                    onChange={(event) => setEpisodeSession(event.target.value)}
-                  />
-                </FormField>
-
-                {episodeMode === "text" ? (
-                  <FormField label="Episode text">
-                    <textarea
-                      className={textareaClass()}
-                      placeholder="We debugged retrieval after a failed memory lookup."
-                      value={episodeText}
-                      onChange={(event) => setEpisodeText(event.target.value)}
-                    />
-                  </FormField>
-                ) : (
-                  <div className="grid gap-4">
-                    <FormField label="File">
-                      <input
-                        className={`${textInputClass()} pt-3`}
-                        type="file"
-                        onChange={(event) => setEpisodeFile(event.target.files?.[0] ?? null)}
-                      />
-                    </FormField>
-                    <FormField label="Content label">
-                      <input
-                        className={textInputClass()}
-                        placeholder="Optional human-readable description"
-                        value={episodeContent}
-                        onChange={(event) => setEpisodeContent(event.target.value)}
-                      />
-                    </FormField>
-                  </div>
-                )}
-
-                <FormField label="Summary">
-                  <input
-                    className={textInputClass()}
-                    placeholder="Optional summary shown in retrieval context"
-                    value={episodeSummary}
-                    onChange={(event) => setEpisodeSummary(event.target.value)}
-                  />
-                </FormField>
-                <MicroCopy>Use file-backed mode for image, audio, video, and PDF episodes. Modality is inferred from the upload.</MicroCopy>
-
-                <PrimaryButton type="submit" disabled={busyLabel !== null}>
-                  <FileUp className="size-4" />
-                  Store episode
-                </PrimaryButton>
-              </form>
-            </WindowPanel>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-6 pt-12 sm:px-8 lg:px-10">
-        <div className="mx-auto max-w-6xl">
-          <SectionLabel>Retrieval</SectionLabel>
-          <div className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
-            <WindowPanel title="mixed query" context="semantic + episodic">
-              <form className="flex flex-col gap-4 sm:flex-row" onSubmit={handleQuerySubmit}>
-                <input
-                  className={textInputClass()}
-                  placeholder="retrieval engine"
-                  value={queryText}
-                  onChange={(event) => setQueryText(event.target.value)}
-                />
-                <PrimaryButton type="submit" disabled={busyLabel !== null}>
-                  <Search className="size-4" />
-                  Search memory
-                </PrimaryButton>
-              </form>
-              <div className="mt-4">
-                <MicroCopy>Runs the unified retriever and shows reranked results across semantic and episodic stores.</MicroCopy>
-              </div>
-            </WindowPanel>
-
-            <WindowPanel title="refresh chrome" context="overview + events">
-              <div className="flex h-full items-center">
-                <GhostButton onClick={() => void refreshChrome()}>
-                  <RefreshCcw className="size-4" />
-                  Refresh
-                </GhostButton>
-              </div>
-            </WindowPanel>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-6 pt-12 sm:px-8 lg:px-10">
-        <div className="mx-auto max-w-6xl">
-          <SectionLabel>Direct Episodic Queries</SectionLabel>
-          <div className="grid gap-4 lg:grid-cols-3">
-            <WindowPanel title="recent episodes" context="episodic only">
-              <form className="space-y-4" onSubmit={handleRecentSubmit}>
-                <FormField label="How many">
-                  <input
-                    className={textInputClass()}
-                    value={recentCount}
-                    onChange={(event) => setRecentCount(event.target.value)}
-                  />
-                </FormField>
-                <PrimaryButton type="submit" disabled={busyLabel !== null}>
-                  <History className="size-4" />
-                  Load recent
-                </PrimaryButton>
-              </form>
-            </WindowPanel>
-
-            <WindowPanel title="session timeline" context="ordered by turn">
-              <form className="space-y-4" onSubmit={handleSessionSubmit}>
-                <FormField label="Session id">
-                  <input
-                    className={textInputClass()}
-                    value={sessionFilter}
-                    onChange={(event) => setSessionFilter(event.target.value)}
-                  />
-                </FormField>
-                <PrimaryButton type="submit" disabled={busyLabel !== null}>
-                  <Binary className="size-4" />
-                  Load session
-                </PrimaryButton>
-              </form>
-            </WindowPanel>
-
-            <WindowPanel title="time range" context="inclusive window">
-              <form className="space-y-4" onSubmit={handleTimeRangeSubmit}>
-                <FormField label="Start">
-                  <input
-                    className={textInputClass()}
-                    type="datetime-local"
-                    value={timeStart}
-                    onChange={(event) => setTimeStart(event.target.value)}
-                  />
-                </FormField>
-                <FormField label="End">
-                  <input
-                    className={textInputClass()}
-                    type="datetime-local"
-                    value={timeEnd}
-                    onChange={(event) => setTimeEnd(event.target.value)}
-                  />
-                </FormField>
-                <PrimaryButton type="submit" disabled={busyLabel !== null}>
-                  <TimerReset className="size-4" />
-                  Load range
-                </PrimaryButton>
-              </form>
-            </WindowPanel>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-6 pt-12 sm:px-8 lg:px-10">
-        <div className="mx-auto max-w-6xl space-y-4">
-          {notice ? (
-            <div
-              className={`glass-border rounded-2xl px-4 py-3 text-sm ${
-                notice.tone === "error"
-                  ? "bg-white/[0.06] text-[var(--text-1)]"
-                  : "bg-white/[0.03] text-[var(--text-2)]"
-              }`}
+            </span>
+            <button
+              type="button"
+              onClick={() => void refreshData()}
+              className="text-[var(--text-4)] transition hover:text-[var(--text-2)]"
+              title="Refresh stats"
             >
-              {busyLabel ? `${busyLabel}... ` : ""}
-              {notice.text}
-            </div>
-          ) : busyLabel ? (
-            <div className="glass-border rounded-2xl bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-2)]">
-              {busyLabel}...
-            </div>
-          ) : null}
-
-          <QueryTable results={queryResults} />
-          <RecordTable title="recent episodic results" records={recentRecords} emptyText="No recent episodic results loaded yet." />
-          <RecordTable title="session results" records={sessionRecords} emptyText="Load a session to inspect ordered episodic playback." />
-          <RecordTable title="time-range results" records={timeRecords} emptyText="Load a time window to inspect episodic memories inside it." />
-          <EventTable events={events} />
-        </div>
-      </section>
-
-      <footer className="px-6 pt-12 sm:px-8 lg:px-10">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4 border-t border-[var(--border)] py-8 text-[12px] text-[var(--text-3)] sm:flex-row sm:items-center sm:justify-between">
-          <span className="mono-numeric">memory.agentclash.dev · powered by the Python memory backend</span>
-          <div className="flex flex-wrap items-center gap-3">
-            <a href={apiDocsUrl} target="_blank" rel="noreferrer" className="hover:text-[var(--text-1)]">
+              <RefreshCcw className="size-3" />
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <a
+              href={`${apiBaseUrl.replace(/\/$/, "")}/docs`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] text-[var(--text-4)] transition hover:text-[var(--text-2)]"
+            >
               API docs
             </a>
-            <a href="https://github.com/agentclash/agentic-memory" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-[var(--text-1)]">
+            <a
+              href="https://github.com/agentclash/agentic-memory"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-[11px] text-[var(--text-4)] transition hover:text-[var(--text-2)]"
+            >
+              <Layers3 className="size-3" />
               Source
-              <ArrowRight className="size-3.5" />
             </a>
           </div>
         </div>
-      </footer>
-    </main>
+      </header>
+
+      {/* ---- Body ---- */}
+      <div className="playground-body">
+        {/* ============================================================ */}
+        {/*  Sidebar                                                      */}
+        {/* ============================================================ */}
+        <aside className="playground-sidebar">
+          {/* sidebar tabs */}
+          <div className="flex items-center gap-1 border-b border-[var(--border)] px-4 py-2">
+            <TabButton active={sidebarTab === "store"} onClick={() => setSidebarTab("store")}>
+              Store
+            </TabButton>
+            <TabButton active={sidebarTab === "explore"} onClick={() => setSidebarTab("explore")}>
+              Explore
+            </TabButton>
+          </div>
+
+          {/* ---- Store tab ---- */}
+          {sidebarTab === "store" && (
+            <>
+              <div className="flex items-center gap-1 border-b border-[var(--border)] px-4 py-2">
+                <TabButton
+                  active={storeMode === "semantic"}
+                  onClick={() => setStoreMode("semantic")}
+                >
+                  Semantic
+                </TabButton>
+                <TabButton active={storeMode === "text"} onClick={() => setStoreMode("text")}>
+                  Text ep.
+                </TabButton>
+                <TabButton active={storeMode === "file"} onClick={() => setStoreMode("file")}>
+                  File ep.
+                </TabButton>
+              </div>
+
+              {/* Semantic form */}
+              {storeMode === "semantic" && (
+                <form className="space-y-4 p-5" onSubmit={handleStoreSemantic}>
+                  <div>
+                    <FormLabel>Fact</FormLabel>
+                    <FieldTextarea
+                      placeholder="The capital of France is Paris."
+                      value={semContent}
+                      onChange={(e) => setSemContent(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+                  <ImportanceSlider value={semImportance} onChange={setSemImportance} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <FormLabel>Category</FormLabel>
+                      <select
+                        value={semCategory}
+                        onChange={(e) => setSemCategory(e.target.value)}
+                        className="field-input"
+                      >
+                        {CATEGORIES.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <FormLabel>Confidence</FormLabel>
+                      <FieldInput
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        value={semConfidence}
+                        onChange={(e) => setSemConfidence(parseFloat(e.target.value) || 1)}
+                      />
+                    </div>
+                  </div>
+                  <SubmitButton disabled={isBusy}>
+                    <Database className="size-3.5" />
+                    Store fact
+                  </SubmitButton>
+                </form>
+              )}
+
+              {/* Text episode form */}
+              {storeMode === "text" && (
+                <form className="space-y-4 p-5" onSubmit={handleStoreTextEpisode}>
+                  <div>
+                    <FormLabel>Session ID</FormLabel>
+                    <FieldInput
+                      value={epiSession}
+                      onChange={(e) => setEpiSession(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <FormLabel>Episode text</FormLabel>
+                    <FieldTextarea
+                      placeholder="We debugged retrieval after a failed memory lookup."
+                      value={epiText}
+                      onChange={(e) => setEpiText(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+                  <div>
+                    <FormLabel>Turn #</FormLabel>
+                    <FieldInput
+                      type="number"
+                      min="0"
+                      placeholder="—"
+                      value={epiTurn}
+                      onChange={(e) => setEpiTurn(e.target.value)}
+                    />
+                  </div>
+                  <ImportanceSlider value={epiImportance} onChange={setEpiImportance} />
+                  <div>
+                    <FormLabel>Summary</FormLabel>
+                    <FieldInput
+                      placeholder="Optional retrieval context"
+                      value={epiSummary}
+                      onChange={(e) => setEpiSummary(e.target.value)}
+                    />
+                  </div>
+                  <SubmitButton disabled={isBusy}>
+                    <History className="size-3.5" />
+                    Store episode
+                  </SubmitButton>
+                </form>
+              )}
+
+              {/* File episode form */}
+              {storeMode === "file" && (
+                <form className="space-y-4 p-5" onSubmit={handleStoreFileEpisode}>
+                  <div>
+                    <FormLabel>Session ID</FormLabel>
+                    <FieldInput
+                      value={epiSession}
+                      onChange={(e) => setEpiSession(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <FormLabel>File</FormLabel>
+                    <FileDropZone file={epiFile} onFile={setEpiFile} />
+                  </div>
+                  <div>
+                    <FormLabel>Content label</FormLabel>
+                    <FieldInput
+                      placeholder="Human-readable description"
+                      value={epiFileContent}
+                      onChange={(e) => setEpiFileContent(e.target.value)}
+                    />
+                  </div>
+                  <ImportanceSlider value={epiImportance} onChange={setEpiImportance} />
+                  <div>
+                    <FormLabel>Summary</FormLabel>
+                    <FieldInput
+                      placeholder="Optional retrieval context"
+                      value={epiSummary}
+                      onChange={(e) => setEpiSummary(e.target.value)}
+                    />
+                  </div>
+                  <SubmitButton disabled={isBusy}>
+                    <FileUp className="size-3.5" />
+                    Store file episode
+                  </SubmitButton>
+                </form>
+              )}
+            </>
+          )}
+
+          {/* ---- Explore tab ---- */}
+          {sidebarTab === "explore" && (
+            <>
+              <div className="flex items-center gap-1 border-b border-[var(--border)] px-4 py-2">
+                <TabButton
+                  active={exploreMode === "recent"}
+                  onClick={() => setExploreMode("recent")}
+                >
+                  Recent
+                </TabButton>
+                <TabButton
+                  active={exploreMode === "session"}
+                  onClick={() => setExploreMode("session")}
+                >
+                  Session
+                </TabButton>
+                <TabButton
+                  active={exploreMode === "time"}
+                  onClick={() => setExploreMode("time")}
+                >
+                  Time range
+                </TabButton>
+              </div>
+
+              {exploreMode === "recent" && (
+                <form className="space-y-4 p-5" onSubmit={handleRecent}>
+                  <div>
+                    <FormLabel>Count</FormLabel>
+                    <FieldInput
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={recentCount}
+                      onChange={(e) => setRecentCount(e.target.value)}
+                    />
+                  </div>
+                  <SubmitButton disabled={isBusy} small>
+                    <History className="size-3" />
+                    Load recent
+                  </SubmitButton>
+                </form>
+              )}
+
+              {exploreMode === "session" && (
+                <form className="space-y-4 p-5" onSubmit={handleSession}>
+                  <div>
+                    <FormLabel>Session ID</FormLabel>
+                    <FieldInput
+                      value={sessionFilter}
+                      onChange={(e) => setSessionFilter(e.target.value)}
+                    />
+                  </div>
+                  <SubmitButton disabled={isBusy} small>
+                    <Clock3 className="size-3" />
+                    Load session
+                  </SubmitButton>
+                </form>
+              )}
+
+              {exploreMode === "time" && (
+                <form className="space-y-4 p-5" onSubmit={handleTimeRange}>
+                  <div>
+                    <FormLabel>Start</FormLabel>
+                    <FieldInput
+                      type="datetime-local"
+                      value={timeStart}
+                      onChange={(e) => setTimeStart(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <FormLabel>End</FormLabel>
+                    <FieldInput
+                      type="datetime-local"
+                      value={timeEnd}
+                      onChange={(e) => setTimeEnd(e.target.value)}
+                    />
+                  </div>
+                  <SubmitButton disabled={isBusy} small>
+                    <Clock3 className="size-3" />
+                    Load range
+                  </SubmitButton>
+                </form>
+              )}
+            </>
+          )}
+        </aside>
+
+        {/* ============================================================ */}
+        {/*  Main content                                                 */}
+        {/* ============================================================ */}
+        <main className="playground-main">
+          {/* ---- Query bar (sticky) ---- */}
+          <div className="query-bar sticky top-0 z-10 border-b border-[var(--border)] px-6 py-4">
+            <form className="flex items-center gap-3" onSubmit={handleQuery}>
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--text-4)]" />
+                <input
+                  className="field-input pl-10"
+                  placeholder="Query your memories..."
+                  value={queryText}
+                  onChange={(e) => setQueryText(e.target.value)}
+                />
+              </div>
+              <SubmitButton disabled={isBusy}>Search</SubmitButton>
+            </form>
+            <div className="mt-3 flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-4)]">
+                  top_k
+                </span>
+                <select
+                  value={topK}
+                  onChange={(e) => setTopK(parseInt(e.target.value, 10))}
+                  className="field-select"
+                >
+                  {[3, 5, 6, 10, 15, 20].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-4)]">
+                  types
+                </span>
+                <select
+                  value={queryTypeFilter}
+                  onChange={(e) =>
+                    setQueryTypeFilter(e.target.value as "all" | "semantic" | "episodic")
+                  }
+                  className="field-select"
+                >
+                  <option value="all">all</option>
+                  <option value="semantic">semantic only</option>
+                  <option value="episodic">episodic only</option>
+                </select>
+              </div>
+              {busyLabel && (
+                <span className="ml-auto animate-pulse text-[11px] text-[var(--text-4)]">
+                  {busyLabel}...
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* ---- Results area ---- */}
+          <div className="space-y-4 p-6">
+            {/* Query results */}
+            {queryResults.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-4)]">
+                  Query results · {queryResults.length} hits
+                </p>
+                {queryResults.map((r) => (
+                  <ResultCard key={r.record.id} result={r} />
+                ))}
+              </div>
+            )}
+
+            {/* No results after query */}
+            {queryResults.length === 0 && querySubmitted && (
+              <div className="py-8 text-center">
+                <p className="text-sm text-[var(--text-3)]">No memories matched your query.</p>
+                <p className="mt-1 text-[12px] text-[var(--text-4)]">
+                  Try a different query or store more memories.
+                </p>
+              </div>
+            )}
+
+            {/* Explore results */}
+            {exploreRecords.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-4)]">
+                  {exploreLabel}
+                </p>
+                {exploreRecords.map((r) => (
+                  <MemoryCard key={r.id} record={r} />
+                ))}
+              </div>
+            )}
+
+            {/* ---- Onboarding empty state ---- */}
+            {!querySubmitted && exploreRecords.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="mb-10 space-y-3">
+                  <h2 className="font-[family-name:var(--font-display)] text-2xl text-[var(--text-1)]">
+                    Query your memory store
+                  </h2>
+                  <p className="max-w-md text-sm leading-6 text-[var(--text-3)]">
+                    Store some memories using the sidebar, then search here to see how the
+                    retrieval system ranks them across semantic and episodic stores.
+                  </p>
+                </div>
+
+                <div className="w-full max-w-lg space-y-8">
+                  {/* Quick-add semantic facts */}
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-4)]">
+                      Quick-add semantic facts
+                    </p>
+                    {EXAMPLE_FACTS.map((ex) => (
+                      <button
+                        key={ex.content}
+                        type="button"
+                        onClick={() => void storeExampleFact(ex.content, ex.category)}
+                        disabled={isBusy}
+                        className="glass-border flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition hover:bg-white/[0.03] disabled:opacity-50"
+                      >
+                        <span className="badge-semantic shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase">
+                          sem
+                        </span>
+                        <span className="text-[13px] text-[var(--text-2)]">{ex.content}</span>
+                        <Zap className="ml-auto size-3.5 shrink-0 text-[var(--text-4)]" />
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Quick-add episodic memories */}
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-4)]">
+                      Quick-add episodic memories
+                    </p>
+                    {EXAMPLE_EPISODES.map((ex) => (
+                      <button
+                        key={ex.content}
+                        type="button"
+                        onClick={() => void storeExampleEpisode(ex.content, ex.session)}
+                        disabled={isBusy}
+                        className="glass-border flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition hover:bg-white/[0.03] disabled:opacity-50"
+                      >
+                        <span className="badge-episodic shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase">
+                          epi
+                        </span>
+                        <span className="text-[13px] text-[var(--text-2)]">{ex.content}</span>
+                        <Zap className="ml-auto size-3.5 shrink-0 text-[var(--text-4)]" />
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Suggested queries */}
+                  <div className="space-y-3 pt-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-4)]">
+                      Then try a query
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {SUGGESTED_QUERIES.map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => {
+                            setQueryText(q);
+                            void runQuery(q);
+                          }}
+                          className="glass-border rounded-lg px-3 py-1.5 text-[12px] text-[var(--text-3)] transition hover:bg-white/[0.04] hover:text-[var(--text-1)]"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+
+      {/* ---- Event drawer ---- */}
+      <EventDrawer
+        events={events}
+        open={eventsOpen}
+        onToggle={() => setEventsOpen(!eventsOpen)}
+      />
+    </div>
   );
 }

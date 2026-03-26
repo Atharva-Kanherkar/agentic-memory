@@ -65,7 +65,16 @@ export function getEvents(limit = 40) {
   return request<{ events: PlaygroundEvent[] }>(`/api/events?limit=${limit}`);
 }
 
-export function createSemanticMemory(input: { content: string; importance?: number; category?: string }) {
+export function checkHealth() {
+  return fetch(`${API_BASE}/health`).then((r) => r.ok);
+}
+
+export function createSemanticMemory(input: {
+  content: string;
+  importance?: number;
+  category?: string;
+  confidence?: number;
+}) {
   return request<{ record: MemoryRecord }>("/api/memories/semantic", {
     method: "POST",
     body: JSON.stringify(input),
@@ -77,6 +86,7 @@ export function createTextEpisode(input: {
   text: string;
   summary?: string;
   turn_number?: number;
+  importance?: number;
 }) {
   return request<{ record: MemoryRecord }>("/api/memories/episodic/text", {
     method: "POST",
@@ -89,12 +99,14 @@ export async function createFileEpisode(input: {
   file: File;
   content?: string;
   summary?: string;
+  importance?: number;
 }) {
   const formData = new FormData();
   formData.append("session_id", input.session_id);
   formData.append("file", input.file);
   if (input.content) formData.append("content", input.content);
   if (input.summary) formData.append("summary", input.summary);
+  if (input.importance !== undefined) formData.append("importance", String(input.importance));
 
   return request<{ record: MemoryRecord }>("/api/memories/episodic/file", {
     method: "POST",
