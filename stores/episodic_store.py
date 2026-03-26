@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from heapq import nlargest
 from pathlib import Path
 
 import chromadb
@@ -102,6 +103,46 @@ class EpisodicStore(BaseStore):
             pairs.append((record, similarity))
         return pairs
 
+    def get_by_session(self, session_id: str) -> list[EpisodicMemory]:
+        """Return all episodic records for a session, ordered by turn then created_at."""
+        records = self._all_records(
+            where={"session_id": session_id},
+            include_embeddings=False,
+        )
+        return sorted(records, key=self._session_sort_key)
+
+    def get_recent(self, n: int) -> list[EpisodicMemory]:
+        """Return the most recent episodic records across sessions, newest first."""
+        if n <= 0:
+            return []
+        return nlargest(
+            n,
+            self._all_records(include_embeddings=False),
+            key=lambda record: self._as_utc(record.created_at),
+        )
+
+    def get_by_time_range(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> list[EpisodicMemory]:
+        """Return records inside an inclusive time window.
+
+        Naive datetimes are treated as UTC so tests and callers have stable behavior.
+        Returned records are sorted chronologically by created_at.
+        """
+        start_utc = self._as_utc(start)
+        end_utc = self._as_utc(end)
+        if start_utc > end_utc:
+            raise ValueError("start must be earlier than or equal to end")
+
+        records = [
+            record
+            for record in self._all_records(include_embeddings=False)
+            if start_utc <= self._as_utc(record.created_at) <= end_utc
+        ]
+        return sorted(records, key=lambda record: self._as_utc(record.created_at))
+
     def update_access(self, record_id: str) -> None:
         now = datetime.now(timezone.utc)
         result = self._collection.get(ids=[record_id], include=["metadatas"])
@@ -178,6 +219,37 @@ class EpisodicStore(BaseStore):
             "source_mime_type": record.source_mime_type or "",
         }
 
+    def _all_records(
+        self,
+        *,
+        where: dict | None = None,
+        include_embeddings: bool = True,
+    ) -> list[EpisodicMemory]:
+        include = ["documents", "metadatas"]
+        if include_embeddings:
+            include.insert(0, "embeddings")
+
+        result = self._collection.get(
+            where=where,
+            include=include,
+        )
+        if not result["ids"]:
+            return []
+        return [self._from_result(result, i) for i in range(len(result["ids"]))]
+
+    def _session_sort_key(self, record: EpisodicMemory) -> tuple[bool, int, datetime]:
+        turn_number = record.turn_number if record.turn_number is not None else 0
+        return (
+            record.turn_number is None,
+            turn_number,
+            self._as_utc(record.created_at),
+        )
+
+    def _as_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
     def _build_record(self, doc: str, record_id: str, embedding, meta: dict) -> EpisodicMemory:
         last_accessed = meta.get("last_accessed_at", "")
         return EpisodicMemory(
@@ -205,10 +277,11 @@ class EpisodicStore(BaseStore):
         )
 
     def _from_result(self, result: dict, index: int) -> EpisodicMemory:
+        embeddings = result.get("embeddings")
         return self._build_record(
             result["documents"][index],
             result["ids"][index],
-            result["embeddings"][index],
+            embeddings[index] if embeddings is not None else None,
             result["metadatas"][index],
         )
 
