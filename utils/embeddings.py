@@ -42,10 +42,18 @@ class GeminiEmbedder:
         """Embed text for querying (RETRIEVAL_QUERY task type)."""
         return self._embed([text], self._query_config)[0]
 
-    def embed_image(self, image_bytes: bytes, mime_type: str = "image/png") -> list[float]:
-        part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+    def embed_bytes(self, data: bytes, mime_type: str) -> list[float]:
+        part = types.Part.from_bytes(data=data, mime_type=mime_type)
         return self._embed([part])[0]
 
+    def embed_image(self, image_bytes: bytes, mime_type: str = "image/png") -> list[float]:
+        return self.embed_bytes(image_bytes, mime_type)
+
     def embed_audio(self, audio_bytes: bytes, mime_type: str = "audio/mpeg") -> list[float]:
-        part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
-        return self._embed([part])[0]
+        return self.embed_bytes(audio_bytes, mime_type)
+
+    def embed_video(self, video_bytes: bytes, mime_type: str = "video/mp4") -> list[float]:
+        return self.embed_bytes(video_bytes, mime_type)
+
+    def embed_pdf(self, pdf_bytes: bytes, mime_type: str = "application/pdf") -> list[float]:
+        return self.embed_bytes(pdf_bytes, mime_type)
