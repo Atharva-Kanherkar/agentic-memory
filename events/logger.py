@@ -10,7 +10,7 @@ class ConsoleLogger:
     """Human-readable console subscriber for memory lifecycle events."""
 
     def __init__(self, stream: TextIO | None = None):
-        self._stream = stream or sys.stdout
+        self._stream = stream or sys.stderr
 
     def register(self, bus: EventBus) -> None:
         bus.subscribe("memory.stored", self.on_memory_stored)
