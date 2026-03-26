@@ -26,8 +26,28 @@ class EventRecorder:
 
 
 class FailingMediaEmbedder(HashingEmbedder):
-    def embed_video(self, video_bytes: bytes, mime_type: str = "video/mp4") -> list[float]:
+    def embed_video(
+        self,
+        source: str,
+        description: str | None = None,
+        mime_type: str = "video/mp4",
+    ) -> list[float]:
         raise RuntimeError("provider rejected media payload")
+
+
+class RecordingMediaEmbedder(HashingEmbedder):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def embed_image(
+        self,
+        source: str,
+        description: str | None = None,
+        mime_type: str | None = "image/png",
+    ) -> list[float]:
+        self.calls.append((source, description, mime_type))
+        return super().embed_image(source, description=description, mime_type=mime_type)
 
 
 def fresh_setup(*, event_bus: EventBus | None = None, embedder=None, max_media_bytes: int | None = None):
@@ -140,6 +160,25 @@ def test_media_backed_episode_round_trip():
     assert loaded.source_mime_type == "image/png"
     assert loaded.text_description == "CI output showing a dependency resolution error"
     print("  PASS  media-backed episodic records preserve multimodal metadata")
+
+
+def test_media_backed_episode_uses_path_based_embedder_interface():
+    embedder = RecordingMediaEmbedder()
+    store, _ = fresh_setup(embedder=embedder)
+    media_path = make_media_file(".png", b"path-based-media")
+    record = EpisodicMemory(
+        content="Screenshot of a failing run",
+        session_id="session-media-path",
+        modality="image",
+        media_ref=media_path,
+        source_mime_type="image/png",
+        text_description="Stack trace in the CI log",
+    )
+
+    store.store(record)
+
+    assert embedder.calls == [(media_path, "Stack trace in the CI log", "image/png")]
+    print("  PASS  episodic media writes call the path-based embedder interface")
 
 
 def test_get_by_session_orders_by_turn_number_then_created_at():
@@ -416,6 +455,7 @@ if __name__ == "__main__":
         test_text_episode_round_trip()
         test_store_emits_memory_stored_on_success()
         test_media_backed_episode_round_trip()
+        test_media_backed_episode_uses_path_based_embedder_interface()
         test_get_by_session_orders_by_turn_number_then_created_at()
         test_get_by_session_filters_across_sessions()
         test_get_recent_returns_newest_first_across_sessions()

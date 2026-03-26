@@ -3,6 +3,7 @@ import math
 import re
 import shutil
 import tempfile
+from pathlib import Path
 
 
 class HashingEmbedder:
@@ -21,17 +22,77 @@ class HashingEmbedder:
         seed = hashlib.sha256(mime_type.encode("utf-8") + b":" + data).hexdigest()
         return self._embed(seed)
 
-    def embed_image(self, image_bytes: bytes, mime_type: str = "image/png") -> list[float]:
-        return self.embed_bytes(image_bytes, mime_type)
+    def embed_image(
+        self,
+        source: str | Path | bytes,
+        description: str | None = None,
+        mime_type: str | None = "image/png",
+    ) -> list[float]:
+        return self._embed_media(source, mime_type or "image/png", description)
 
-    def embed_audio(self, audio_bytes: bytes, mime_type: str = "audio/mpeg") -> list[float]:
-        return self.embed_bytes(audio_bytes, mime_type)
+    def embed_audio(
+        self,
+        source: str | Path | bytes,
+        description: str | None = None,
+        mime_type: str | None = "audio/mpeg",
+    ) -> list[float]:
+        return self._embed_media(source, mime_type or "audio/mpeg", description)
 
-    def embed_video(self, video_bytes: bytes, mime_type: str = "video/mp4") -> list[float]:
-        return self.embed_bytes(video_bytes, mime_type)
+    def embed_video(
+        self,
+        source: str | Path | bytes,
+        description: str | None = None,
+        mime_type: str | None = "video/mp4",
+    ) -> list[float]:
+        return self._embed_media(source, mime_type or "video/mp4", description)
 
-    def embed_pdf(self, pdf_bytes: bytes, mime_type: str = "application/pdf") -> list[float]:
-        return self.embed_bytes(pdf_bytes, mime_type)
+    def embed_pdf(
+        self,
+        source: str | Path | bytes,
+        description: str | None = None,
+        mime_type: str | None = "application/pdf",
+    ) -> list[float]:
+        return self._embed_media(source, mime_type or "application/pdf", description)
+
+    def embed_multimodal(
+        self,
+        *,
+        text: str | None = None,
+        image: str | Path | bytes | None = None,
+        audio: str | Path | bytes | None = None,
+        video: str | Path | bytes | None = None,
+        pdf: str | Path | bytes | None = None,
+        image_mime_type: str | None = "image/png",
+        audio_mime_type: str | None = "audio/mpeg",
+        video_mime_type: str | None = "video/mp4",
+        pdf_mime_type: str | None = "application/pdf",
+    ) -> list[float]:
+        parts = []
+        if text:
+            parts.append(text)
+        if image is not None:
+            parts.append(self._media_seed(image, image_mime_type or "image/png"))
+        if audio is not None:
+            parts.append(self._media_seed(audio, audio_mime_type or "audio/mpeg"))
+        if video is not None:
+            parts.append(self._media_seed(video, video_mime_type or "video/mp4"))
+        if pdf is not None:
+            parts.append(self._media_seed(pdf, pdf_mime_type or "application/pdf"))
+        return self._embed(" ".join(parts))
+
+    def _embed_media(self, source: str | Path | bytes, mime_type: str, description: str | None) -> list[float]:
+        seed = self._media_seed(source, mime_type)
+        if description:
+            seed = f"{description} {seed}"
+        return self._embed(seed)
+
+    def _media_seed(self, source: str | Path | bytes, mime_type: str) -> str:
+        return hashlib.sha256(mime_type.encode("utf-8") + b":" + self._read_source(source)).hexdigest()
+
+    def _read_source(self, source: str | Path | bytes) -> bytes:
+        if isinstance(source, bytes):
+            return source
+        return Path(source).read_bytes()
 
     def _embed(self, text: str) -> list[float]:
         vector = [0.0] * self._dimensions
@@ -54,6 +115,14 @@ class DeterministicMultimodalEmbedder(HashingEmbedder):
         except UnicodeDecodeError:
             payload = hashlib.sha256(data).hexdigest()
         return self._embed(f"{mime_type} {payload}")
+
+    def _media_seed(self, source: str | Path | bytes, mime_type: str) -> str:
+        data = self._read_source(source)
+        try:
+            payload = data.decode("utf-8")
+        except UnicodeDecodeError:
+            payload = hashlib.sha256(data).hexdigest()
+        return f"{mime_type} {payload}"
 
 
 def make_temp_chroma_dir(prefix: str) -> str:
