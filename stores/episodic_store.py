@@ -177,10 +177,13 @@ class EpisodicStore(BaseStore):
                 f"limit_bytes={self._max_media_bytes} path={record.media_ref}"
             )
 
-        media_bytes = media_path.read_bytes()
         mime_type = record.source_mime_type or _DEFAULT_MIME_TYPES.get(record.modality, "application/octet-stream")
         try:
-            return embed_method(media_bytes, mime_type=mime_type)
+            return embed_method(
+                str(media_path),
+                description=record.text_description,
+                mime_type=mime_type,
+            )
         except Exception as exc:
             # Some provider/media combinations are rejected even though the file is valid.
             # Preserve the record by falling back to text embedding instead of failing the write.
