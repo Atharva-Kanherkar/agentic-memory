@@ -44,7 +44,9 @@ async def test_store_semantic_and_query_mixed_results():
 
 @pytest.mark.anyio
 async def test_store_file_episode_and_temporal_queries():
+    media_root = tempfile.mkdtemp(prefix="memory_api_media_")
     async with make_client() as client:
+        client.app.state.service_config["media_root"] = media_root
         response = await client.post(
             "/api/memories/episodic/file",
             data={
@@ -68,7 +70,8 @@ async def test_store_file_episode_and_temporal_queries():
     assert response.status_code == 200
     assert record["modality"] == "image"
     assert record["source_mime_type"] == "image/png"
-    assert record["media_ref"].endswith(".png")
+    assert record["media_ref"] == os.path.join(media_root, "images", f"{record['id']}.png")
+    assert os.path.exists(record["media_ref"])
     assert recent.status_code == 200
     assert session.status_code == 200
     assert time_range.status_code == 200
@@ -79,7 +82,9 @@ async def test_store_file_episode_and_temporal_queries():
 
 @pytest.mark.anyio
 async def test_store_file_episode_inferrs_modality_from_extension_and_mime():
+    media_root = tempfile.mkdtemp(prefix="memory_api_media_")
     async with make_client() as client:
+        client.app.state.service_config["media_root"] = media_root
         audio = await client.post(
             "/api/memories/episodic/file",
             data={"session_id": "session-audio"},
@@ -95,6 +100,8 @@ async def test_store_file_episode_inferrs_modality_from_extension_and_mime():
     assert pdf.status_code == 200
     assert audio.json()["record"]["modality"] == "audio"
     assert pdf.json()["record"]["modality"] == "pdf"
+    assert audio.json()["record"]["media_ref"].endswith(f"/audio/{audio.json()['record']['id']}.mp3")
+    assert pdf.json()["record"]["media_ref"].endswith(f"/documents/{pdf.json()['record']['id']}.pdf")
 
 
 @pytest.mark.anyio
