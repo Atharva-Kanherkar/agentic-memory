@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import tempfile
+import uuid
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -56,9 +57,9 @@ def test_model_defaults():
 
     assert record.memory_type == "episodic"
     assert record.modality == "text"
-    assert record.session_id == "default"
+    assert str(uuid.UUID(record.session_id)) == record.session_id
     assert record.turn_number is None
-    assert record.participants == []
+    assert record.participants == ["user", "agent"]
     print("  PASS  EpisodicMemory defaults to episodic with sane field defaults")
 
 
@@ -90,6 +91,30 @@ def test_text_episode_round_trip():
     assert loaded.importance == 0.9
     assert loaded.modality == "text"
     print("  PASS  text-backed episodic records round-trip through the store")
+
+
+def test_store_emits_memory_stored_on_success():
+    bus = EventBus()
+    recorder = EventRecorder(bus, "memory.stored")
+    store, _ = fresh_setup(event_bus=bus)
+    record = EpisodicMemory(
+        content="Captured an episodic event after a successful run",
+        session_id="session-success",
+        importance=0.8,
+    )
+
+    record_id = store.store(record)
+
+    assert record_id == record.id
+    assert len(recorder.events) == 1
+    event = recorder.events[0]
+    assert event.data["record_id"] == record.id
+    assert event.data["memory_type"] == "episodic"
+    assert event.data["content"] == record.content
+    assert event.data["modality"] == "text"
+    assert event.data["importance"] == 0.8
+    assert event.data["session_id"] == "session-success"
+    print("  PASS  EpisodicStore emits memory.stored after successful persistence")
 
 
 def test_media_backed_episode_round_trip():
@@ -229,6 +254,7 @@ if __name__ == "__main__":
     try:
         test_model_defaults()
         test_text_episode_round_trip()
+        test_store_emits_memory_stored_on_success()
         test_media_backed_episode_round_trip()
         test_retrieval_shape()
         test_access_tracking()
