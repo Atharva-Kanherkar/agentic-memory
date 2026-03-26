@@ -1,6 +1,8 @@
 .venv/
 .env
 chroma_db/
+web/.next*/
+web/node_modules/
 media/*.mp3
 media/*.wav
 media/*.mp4

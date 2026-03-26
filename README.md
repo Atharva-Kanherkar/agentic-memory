@@ -217,8 +217,11 @@ agentic-memory/
 │   └── semantic_store.py      # ChromaDB-backed semantic store
 ├── retrieval/                  # (planned) Unified cross-store retriever
 ├── events/                     # (planned) Event bus for store/retrieve signals
+├── api/
+│   └── app.py                 # FastAPI boundary over stores/retriever/events
 ├── demo/
 │   └── cli.py                 # CLI for storing and querying memories
+├── web/                       # Next.js playground UI for memory workflows
 ├── experiments/
 │   ├── audio_emotion_probe.py           # Cross-modal emotion probe script
 │   └── audio_emotion_probe_results.md   # Full results and analysis
@@ -249,6 +252,46 @@ sudo pacman -S ffmpeg
 
 # ubuntu/debian
 sudo apt install ffmpeg
+```
+
+## API
+
+Run the Python API locally:
+
+```bash
+.venv/bin/python -m uvicorn api.app:app --reload
+```
+
+Key routes:
+
+- `POST /api/memories/semantic`
+- `POST /api/memories/episodic/text`
+- `POST /api/memories/episodic/file`
+- `POST /api/retrieval/query`
+- `GET /api/episodes/recent`
+- `GET /api/episodes/session/{session_id}`
+- `GET /api/episodes/time-range`
+- `GET /api/events`
+- `GET /api/overview`
+
+Interactive docs:
+
+- `http://localhost:8000/docs`
+
+## Playground UI
+
+The repository now includes a Next.js playground in `web/` that talks to the Python API.
+
+```bash
+cd web
+npm install
+NEXT_PUBLIC_MEMORY_API_BASE_URL=http://localhost:8000 npm run dev
+```
+
+For a Vercel deployment such as `memory.agentclash.dev`, set:
+
+```bash
+NEXT_PUBLIC_MEMORY_API_BASE_URL=<your deployed Python API base URL>
 ```
 
 ---
