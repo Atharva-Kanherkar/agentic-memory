@@ -10,7 +10,12 @@ _LEGACY_MODALITY_ALIASES = {
 
 
 def normalize_modality(modality: str | None) -> str:
-    resolved = (modality or "text").strip().lower()
+    if modality is None:
+        resolved = "text"
+    elif isinstance(modality, str):
+        resolved = modality.strip().lower()
+    else:
+        raise ValueError("Unsupported modality type. Expected a string or null.")
     resolved = _LEGACY_MODALITY_ALIASES.get(resolved, resolved)
     if resolved not in ALLOWED_MODALITIES:
         supported = ", ".join(sorted(ALLOWED_MODALITIES))
@@ -41,6 +46,8 @@ class MemoryRecord:
     text_description: Optional[str] = None
 
     def __post_init__(self) -> None:
+        # Subclasses that override __post_init__ must call super().__post_init__()
+        # so modality normalization remains part of the record contract.
         self.modality = normalize_modality(self.modality)
 
     @property

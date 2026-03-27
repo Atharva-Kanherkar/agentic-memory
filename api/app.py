@@ -31,6 +31,7 @@ DEFAULT_ALLOWED_ORIGINS = [
 
 DEFAULT_MEDIA_DIR = Path(os.getenv("MEMORY_MEDIA_DIR", config.MEDIA_STORAGE_PATH))
 _SUPPORTED_FILE_MODALITIES = {"audio", "image", "video", "multimodal"}
+_ALLOWED_MEDIA_TYPES = {"image", "audio", "video", "pdf"}
 
 
 def _normalise_origins(origins: list[str] | None = None) -> list[str]:
@@ -74,6 +75,35 @@ def _infer_media_contract(*, mime_type: str | None, filename: str | None) -> tup
     if suffix == ".pdf":
         return "multimodal", "pdf"
     return None
+
+
+def _validate_media_type(media_type: Any) -> str | None:
+    if media_type is None:
+        return None
+    if not isinstance(media_type, str):
+        raise ValueError("media_type must be a string if provided")
+
+    resolved = media_type.strip().lower()
+    if resolved not in _ALLOWED_MEDIA_TYPES:
+        supported = ", ".join(sorted(_ALLOWED_MEDIA_TYPES))
+        raise ValueError(f"Unsupported media_type '{media_type}'. Supported values: {supported}")
+    return resolved
+
+
+def _validate_emotional_profile(raw_profile: Any) -> dict[str, float]:
+    if raw_profile is None:
+        return {}
+    if not isinstance(raw_profile, Mapping):
+        raise ValueError("emotional_profile must be an object mapping strings to numbers")
+
+    profile: dict[str, float] = {}
+    for key, value in raw_profile.items():
+        if not isinstance(key, str):
+            raise ValueError("emotional_profile keys must be strings")
+        if not isinstance(value, (int, float)):
+            raise ValueError("emotional_profile values must be numeric")
+        profile[key] = float(value)
+    return profile
 
 
 def _serialise_record(record: MemoryRecord) -> dict[str, Any]:
@@ -229,6 +259,7 @@ def create_app(
         if not payload.get("content"):
             raise HTTPException(status_code=400, detail="content is required")
         try:
+            media_type = _validate_media_type(payload.get("media_type"))
             record = SemanticMemory(
                 content=payload["content"],
                 importance=float(payload.get("importance", 0.5)),
@@ -236,7 +267,7 @@ def create_app(
                 confidence=float(payload.get("confidence", 1.0)),
                 modality=payload.get("modality", "text"),
                 media_ref=payload.get("media_ref"),
-                media_type=payload.get("media_type"),
+                media_type=media_type,
                 text_description=payload.get("text_description"),
             )
         except ValueError as exc:
@@ -250,15 +281,19 @@ def create_app(
             raise HTTPException(status_code=400, detail="session_id is required")
         if not payload.get("text"):
             raise HTTPException(status_code=400, detail="text is required")
-        record = EpisodicMemory(
-            content=payload["text"],
-            session_id=payload["session_id"],
-            turn_number=payload.get("turn_number"),
-            participants=payload.get("participants", ["user", "agent"]),
-            summary=payload.get("summary"),
-            emotional_profile=payload.get("emotional_profile", {}),
-            importance=float(payload.get("importance", 0.5)),
-        )
+        try:
+            emotional_profile = _validate_emotional_profile(payload.get("emotional_profile"))
+            record = EpisodicMemory(
+                content=payload["text"],
+                session_id=payload["session_id"],
+                turn_number=payload.get("turn_number"),
+                participants=payload.get("participants", ["user", "agent"]),
+                summary=payload.get("summary"),
+                emotional_profile=emotional_profile,
+                importance=float(payload.get("importance", 0.5)),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         service().episodic_store.store(record)
         return {"record": _serialise_record(record)}
 
@@ -276,13 +311,19 @@ def create_app(
         inferred_modality = inferred_contract[0] if inferred_contract else None
         inferred_media_type = inferred_contract[1] if inferred_contract else None
         try:
-            resolved_modality = normalize_modality(modality or inferred_modality)
+            requested_modality = normalize_modality(modality) if modality is not None else None
+            resolved_modality = requested_modality or normalize_modality(inferred_modality)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if modality is not None and inferred_modality is not None and resolved_modality != inferred_modality:
+        if requested_modality is not None and inferred_modality is not None and requested_modality != inferred_modality:
             raise HTTPException(
                 status_code=400,
                 detail="uploaded file does not match the requested modality",
+            )
+        if resolved_modality == "multimodal" and inferred_media_type != "pdf":
+            raise HTTPException(
+                status_code=400,
+                detail="multimodal file uploads currently require a PDF file",
             )
         if resolved_modality not in _SUPPORTED_FILE_MODALITIES:
             raise HTTPException(
@@ -293,7 +334,7 @@ def create_app(
             content=content or f"{resolved_modality} episode from {file.filename}",
             session_id=session_id,
             modality=resolved_modality,
-            media_type=inferred_media_type or ("pdf" if resolved_modality == "multimodal" else resolved_modality),
+            media_type=inferred_media_type or resolved_modality,
             turn_number=turn_number,
             summary=summary,
             importance=importance,

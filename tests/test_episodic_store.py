@@ -49,6 +49,15 @@ class RecordingMediaEmbedder(HashingEmbedder):
         self.calls.append((source, description, mime_type))
         return super().embed_image(source, description=description, mime_type=mime_type)
 
+    def embed_pdf(
+        self,
+        source: str,
+        description: str | None = None,
+        mime_type: str | None = "application/pdf",
+    ) -> list[float]:
+        self.calls.append((source, description, mime_type))
+        return super().embed_pdf(source, description=description, mime_type=mime_type)
+
 
 def fresh_setup(*, event_bus: EventBus | None = None, embedder=None, max_media_bytes: int | None = None):
     db_path = tempfile.mkdtemp(prefix="chroma_test_episodic_")
@@ -185,6 +194,59 @@ def test_media_backed_episode_uses_path_based_embedder_interface():
 
     assert embedder.calls == [(media_path, "Stack trace in the CI log", "image/png")]
     print("  PASS  episodic media writes call the path-based embedder interface")
+
+
+def test_pdf_backed_multimodal_episode_uses_pdf_embedder():
+    embedder = RecordingMediaEmbedder()
+    store, _ = fresh_setup(embedder=embedder)
+    media_path = make_media_file(".pdf", b"%PDF-1.4\nmultimodal")
+    record = EpisodicMemory(
+        content="Design notes from the review",
+        session_id="session-pdf",
+        modality="multimodal",
+        media_ref=media_path,
+        media_type="pdf",
+        source_mime_type="application/pdf",
+        text_description="PDF handoff from the design review",
+    )
+
+    store.store(record)
+
+    assert embedder.calls == [(media_path, "PDF handoff from the design review", "application/pdf")]
+    print("  PASS  multimodal PDF writes route through the PDF embedder")
+
+
+def test_bad_emotional_profile_metadata_defaults_to_empty_dict():
+    store, _ = fresh_setup()
+    malformed = store._build_record(
+        "Recovered record",
+        "record-1",
+        None,
+        {
+            "created_at": datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc).isoformat(),
+            "last_accessed_at": "",
+            "access_count": 0,
+            "importance": 0.5,
+            "source": "",
+            "metadata_json": "{}",
+            "modality": "text",
+            "session_id": "session-alpha",
+            "has_turn_number": False,
+            "turn_number": 0,
+            "participants_json": "[]",
+            "summary": "",
+            "has_emotional_valence": False,
+            "emotional_valence": 0.0,
+            "emotional_profile_json": "null",
+            "media_ref": "",
+            "media_type": "",
+            "text_description": "",
+            "source_mime_type": "",
+        },
+    )
+
+    assert malformed.emotional_profile == {}
+    print("  PASS  malformed emotional profile metadata falls back to an empty dict")
 
 
 def test_get_by_session_orders_by_turn_number_then_created_at():

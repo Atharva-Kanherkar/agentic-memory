@@ -214,6 +214,7 @@ class EpisodicStore(BaseStore):
         if record.modality == "multimodal":
             if record.media_type == "pdf" or record.source_mime_type == "application/pdf":
                 return "embed_pdf", record.source_mime_type or "application/pdf"
+            # TODO: Route non-PDF multimodal records through embed_multimodal once MM-5D lands.
             return None, None
 
         embed_method_name = _MEDIA_EMBED_METHODS.get(record.modality)
@@ -226,6 +227,9 @@ class EpisodicStore(BaseStore):
         return embed_method_name, mime_type
 
     def _to_metadata(self, record: EpisodicMemory) -> dict:
+        emotional_profile = (
+            record.emotional_profile if isinstance(record.emotional_profile, dict) else {}
+        )
         return {
             "memory_type": record.memory_type,
             "modality": record.modality,
@@ -242,7 +246,7 @@ class EpisodicStore(BaseStore):
             "summary": record.summary or "",
             "has_emotional_valence": record.emotional_valence is not None,
             "emotional_valence": record.emotional_valence if record.emotional_valence is not None else 0.0,
-            "emotional_profile_json": json.dumps(record.emotional_profile, sort_keys=True),
+            "emotional_profile_json": json.dumps(emotional_profile, sort_keys=True),
             "media_ref": record.media_ref or "",
             "media_type": record.media_type or "",
             "text_description": record.text_description or "",
@@ -282,6 +286,7 @@ class EpisodicStore(BaseStore):
 
     def _build_record(self, doc: str, record_id: str, embedding, meta: dict) -> EpisodicMemory:
         last_accessed = meta.get("last_accessed_at", "")
+        emotional_profile = self._parse_emotional_profile(meta.get("emotional_profile_json"))
         return EpisodicMemory(
             content=doc,
             id=record_id,
@@ -300,15 +305,32 @@ class EpisodicStore(BaseStore):
             emotional_valence=(
                 float(meta["emotional_valence"]) if meta.get("has_emotional_valence") else None
             ),
-            emotional_profile={
-                key: float(value)
-                for key, value in json.loads(meta.get("emotional_profile_json", "{}")).items()
-            },
+            emotional_profile=emotional_profile,
             media_ref=meta.get("media_ref") or None,
             media_type=meta.get("media_type") or None,
             text_description=meta.get("text_description") or None,
             source_mime_type=meta.get("source_mime_type") or None,
         )
+
+    def _parse_emotional_profile(self, raw_profile: str | None) -> dict[str, float]:
+        if not raw_profile:
+            return {}
+
+        try:
+            decoded = json.loads(raw_profile)
+        except json.JSONDecodeError:
+            return {}
+
+        if not isinstance(decoded, dict):
+            return {}
+
+        profile: dict[str, float] = {}
+        for key, value in decoded.items():
+            try:
+                profile[str(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return profile
 
     def _from_result(self, result: dict, index: int) -> EpisodicMemory:
         embeddings = result.get("embeddings")

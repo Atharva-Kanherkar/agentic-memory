@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.app import create_app
+from models.base import normalize_modality
 from stores.episodic_store import EpisodicStoreError
 from tests.helpers import HashingEmbedder
 
@@ -76,6 +77,36 @@ async def test_store_semantic_memory_round_trips_media_contract():
     assert record["media_type"] == "image"
     assert record["text_description"] == "Whiteboard sketch of the retrieval stack"
     assert record["has_media"] is True
+
+
+@pytest.mark.anyio
+async def test_semantic_memory_rejects_invalid_media_type():
+    async with make_client() as client:
+        response = await client.post(
+            "/api/memories/semantic",
+            json={
+                "content": "Bad semantic media contract",
+                "media_type": "archive",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "Unsupported media_type" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_semantic_memory_rejects_non_string_modality():
+    async with make_client() as client:
+        response = await client.post(
+            "/api/memories/semantic",
+            json={
+                "content": "Bad semantic modality",
+                "modality": True,
+            },
+        )
+
+    assert response.status_code == 400
+    assert "Unsupported modality type" in response.json()["detail"]
 
 
 @pytest.mark.anyio
@@ -151,6 +182,78 @@ async def test_store_file_episode_infers_modality_from_extension_and_mime():
         )
     finally:
         shutil.rmtree(media_root, ignore_errors=True)
+
+
+@pytest.mark.anyio
+async def test_store_file_episode_rejects_non_pdf_multimodal_upload():
+    media_root = tempfile.mkdtemp(prefix="memory_api_media_")
+    try:
+        async with make_client(media_root=media_root) as client:
+            response = await client.post(
+                "/api/memories/episodic/file",
+                data={"session_id": "session-multimodal", "modality": "multimodal"},
+                files={"file": ("clip.mp3", b"fake-audio", "audio/mpeg")},
+            )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "uploaded file does not match the requested modality"
+    finally:
+        shutil.rmtree(media_root, ignore_errors=True)
+
+
+@pytest.mark.anyio
+async def test_text_episode_round_trips_emotional_profile_via_api():
+    async with make_client() as client:
+        create = await client.post(
+            "/api/memories/episodic/text",
+            json={
+                "session_id": "session-emotions",
+                "text": "We wrapped up the debugging session",
+                "emotional_profile": {"relief": 0.9, "confidence": 0.6},
+            },
+        )
+        recent = await client.get("/api/episodes/recent", params={"n": 1})
+
+    assert create.status_code == 200
+    assert create.json()["record"]["emotional_profile"] == {"relief": 0.9, "confidence": 0.6}
+    assert recent.status_code == 200
+    assert recent.json()["records"][0]["emotional_profile"] == {"relief": 0.9, "confidence": 0.6}
+
+
+@pytest.mark.anyio
+async def test_text_episode_rejects_invalid_emotional_profile_values():
+    async with make_client() as client:
+        response = await client.post(
+            "/api/memories/episodic/text",
+            json={
+                "session_id": "session-invalid-emotions",
+                "text": "This payload should fail",
+                "emotional_profile": {"evil": "not-a-float"},
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "emotional_profile values must be numeric"
+
+
+@pytest.mark.anyio
+async def test_text_episode_treats_null_emotional_profile_as_empty():
+    async with make_client() as client:
+        response = await client.post(
+            "/api/memories/episodic/text",
+            json={
+                "session_id": "session-null-emotions",
+                "text": "Null emotional profile is acceptable",
+                "emotional_profile": None,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["record"]["emotional_profile"] == {}
+
+
+def test_normalize_modality_maps_legacy_pdf_alias():
+    assert normalize_modality("pdf") == "multimodal"
 
 
 @pytest.mark.anyio
