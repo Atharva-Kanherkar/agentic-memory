@@ -61,6 +61,13 @@ class MediaStore:
             raise FileNotFoundError(f"Stored media not found: {path}")
         return str(path)
 
+    def owns(self, media_ref: str | Path) -> bool:
+        try:
+            self._validate_owned(media_ref)
+            return True
+        except ValueError:
+            return False
+
     def delete(self, media_ref: str | Path) -> None:
         path = self._validate_owned(media_ref)
         if not path.exists():
