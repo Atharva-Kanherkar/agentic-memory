@@ -196,7 +196,7 @@ async def test_store_file_episode_rejects_non_pdf_multimodal_upload():
             )
 
         assert response.status_code == 400
-        assert response.json()["detail"] == "uploaded file does not match the requested modality"
+        assert response.json()["detail"] == "multimodal file uploads currently require a PDF file"
     finally:
         shutil.rmtree(media_root, ignore_errors=True)
 

@@ -315,6 +315,11 @@ def create_app(
             resolved_modality = requested_modality or normalize_modality(inferred_modality)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if requested_modality == "multimodal" and inferred_media_type != "pdf":
+            raise HTTPException(
+                status_code=400,
+                detail="multimodal file uploads currently require a PDF file",
+            )
         if requested_modality is not None and inferred_modality is not None and requested_modality != inferred_modality:
             raise HTTPException(
                 status_code=400,
