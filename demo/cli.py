@@ -70,6 +70,11 @@ def _default_episode_content(file_path: str, modality: str) -> str:
     return f"{modality} episode from {Path(file_path).name}"
 
 
+def _exit_with_error(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
 def _infer_media_type(path: str) -> str:
     return MediaStore.resolve_media_type(path)
 
@@ -137,7 +142,10 @@ def cmd_store(args):
         media_ref=media_path,
         media_type=_infer_media_type(media_path) if media_path else None,
     )
-    record_id = store.store(record)
+    try:
+        record_id = store.store(record)
+    except (FileNotFoundError, ValueError) as exc:
+        _exit_with_error(str(exc))
     print(f"Stored [{record_id[:8]}]: {args.content}")
 
 

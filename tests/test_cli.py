@@ -78,6 +78,18 @@ def run_cli(argv):
     return stdout.getvalue(), stderr.getvalue()
 
 
+def run_cli_expecting_exit(argv):
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with patch.object(sys, "argv", argv):
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            try:
+                cli.main()
+                raise AssertionError("Expected CLI to exit")
+            except SystemExit as exc:
+                return exc.code, stdout.getvalue(), stderr.getvalue()
+
+
 def test_store_episode_text_cli_smoke():
     store = RecordingStore()
 
@@ -177,6 +189,23 @@ def test_store_semantic_image_cli_uses_required_content_and_owned_media():
             print("  PASS  CLI semantic store keeps content required for image-backed facts")
     finally:
         os.remove(path)
+
+
+def test_store_semantic_image_cli_reports_missing_file_cleanly():
+    exit_code, stdout, stderr = run_cli_expecting_exit(
+        [
+            "cli",
+            "store",
+            "Architecture whiteboard",
+            "--image",
+            "./does-not-exist.png",
+        ]
+    )
+
+    assert exit_code == 2
+    assert stdout == ""
+    assert "Media file not found" in stderr
+    print("  PASS  CLI semantic store reports missing media without a traceback")
 
 
 def test_recent_cli_smoke():

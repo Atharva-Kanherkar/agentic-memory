@@ -157,6 +157,21 @@ def _parse_memory_types(raw_value: str | None) -> list[str] | None:
     return values
 
 
+def _validate_query_upload(upload: UploadFile, *, modality: str) -> str:
+    inferred_contract = _infer_media_contract(
+        mime_type=upload.content_type,
+        filename=upload.filename,
+    )
+    if inferred_contract is None:
+        raise ValueError(f"query-by-{modality} requires a supported {modality} file upload")
+
+    inferred_modality, _ = inferred_contract
+    if inferred_modality != modality:
+        raise ValueError(f"query-by-{modality} requires a supported {modality} file upload")
+
+    return upload.content_type or mimetypes.guess_type(upload.filename or "")[0] or "application/octet-stream"
+
+
 def _cleanup_owned_media(service: MemoryAPIService, media_ref: str | None) -> None:
     if media_ref and service.media_store.owns(media_ref):
         service.media_store.delete(media_ref)
@@ -496,6 +511,7 @@ def create_app(
         query_path = None
         try:
             parsed_memory_types = _parse_memory_types(memory_types)
+            _validate_query_upload(file, modality="image")
             query_path, mime_type = active_service.save_query_upload(file)
             vector = active_service.embedder.embed_image(query_path, mime_type=mime_type)
             results = active_service.retriever.query_by_vector(
@@ -530,6 +546,7 @@ def create_app(
         query_path = None
         try:
             parsed_memory_types = _parse_memory_types(memory_types)
+            _validate_query_upload(file, modality="audio")
             query_path, mime_type = active_service.save_query_upload(file)
             vector = active_service.embedder.embed_audio(query_path, mime_type=mime_type)
             results = active_service.retriever.query_by_vector(

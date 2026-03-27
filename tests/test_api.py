@@ -300,6 +300,18 @@ async def test_query_by_audio_endpoint_returns_vector_metadata_and_text_match():
 
 
 @pytest.mark.anyio
+async def test_query_by_image_rejects_non_image_upload_with_clear_message():
+    async with make_client() as client:
+        response = await client.post(
+            "/api/retrieval/query-by-image",
+            files={"file": ("notes.txt", b"not-an-image", "text/plain")},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "query-by-image requires a supported image file upload"
+
+
+@pytest.mark.anyio
 async def test_store_file_episode_allows_non_pdf_multimodal_upload():
     media_root = tempfile.mkdtemp(prefix="memory_api_media_")
     try:
