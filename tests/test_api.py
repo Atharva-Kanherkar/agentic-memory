@@ -8,13 +8,13 @@ from pathlib import Path
 
 import httpx
 import pytest
-from google.genai import errors as genai_errors
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.app import create_app
 from models.base import normalize_modality
 from stores.episodic_store import EpisodicStoreError
+from utils.embeddings import EmbeddingProviderError
 from tests.helpers import HashingEmbedder
 
 
@@ -432,11 +432,7 @@ async def test_semantic_provider_failure_returns_502_and_cleans_up_owned_media()
             def fail_store(record):
                 owned_ref = service.media_store.store(record.media_ref, record.id)
                 record.media_ref = owned_ref
-                raise genai_errors.ServerError(
-                    500,
-                    {"error": {"code": 500, "message": "Internal error encountered.", "status": "INTERNAL"}},
-                    None,
-                )
+                raise EmbeddingProviderError("Gemini embedding provider failed after retries")
 
             service.semantic_store.store = fail_store
             response = await client.post(

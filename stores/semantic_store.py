@@ -163,7 +163,8 @@ class SemanticStore(BaseStore):
 
         # Semantic media records always carry meaningful text context in `content`,
         # so aggregate text + media into one vector rather than treating the media
-        # as an isolated payload.
+        # as an isolated payload. This is intentionally asymmetric with the
+        # episodic store, which keeps its modality-specific embedding strategy.
         return self._embed_multimodal(
             media_type,
             media_path,

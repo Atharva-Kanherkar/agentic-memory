@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from google.genai import errors as genai_errors
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,7 +22,7 @@ from retrieval.retriever import UnifiedRetriever
 from stores.episodic_store import EpisodicStore, EpisodicStoreError, MediaTooLargeError
 from stores.media_store import MediaStore
 from stores.semantic_store import SemanticStore
-from utils.embeddings import TextEmbedder
+from utils.embeddings import EmbeddingProviderError, TextEmbedder
 
 DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -324,7 +323,7 @@ def create_app(
         except (FileNotFoundError, ValueError) as exc:
             _cleanup_owned_media(active_service, record.media_ref)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except genai_errors.ServerError as exc:
+        except EmbeddingProviderError as exc:
             _cleanup_owned_media(active_service, record.media_ref)
             raise HTTPException(
                 status_code=502,

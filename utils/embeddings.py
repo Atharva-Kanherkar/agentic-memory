@@ -10,8 +10,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Protocol
 
-from google.genai import errors as genai_errors
-
 from config import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, GEMINI_API_KEY
 from utils.retry import retry_with_exponential_backoff
 
@@ -49,6 +47,10 @@ class TextEmbedder(Protocol):
     def embed_query(self, text: str) -> list[float]: ...
 
 
+class EmbeddingProviderError(RuntimeError):
+    """Raised when the upstream embedding provider fails after retries."""
+
+
 class GeminiEmbedder:
     """Converts text and local media into Gemini embedding vectors."""
 
@@ -56,6 +58,7 @@ class GeminiEmbedder:
         self._genai = None
         self._client = None
         self._types = None
+        self._errors = None
         self._doc_config = None
         self._query_config = None
 
@@ -199,10 +202,9 @@ class GeminiEmbedder:
                 "path": str(path),
                 "exists": path.exists(),
                 "suffix": path.suffix.lower(),
-                "size": path.stat().st_size if path.exists() else None,
             }
 
-        _logger.warning(
+        _logger.debug(
             "embed_multimodal request: text_len=%s image=%s image_mime=%s "
             "audio=%s audio_mime=%s video=%s video_mime=%s pdf=%s pdf_mime=%s "
             "chunked_modality=%s chunked_source=%s",
@@ -313,7 +315,7 @@ class GeminiEmbedder:
             return [list(embedding.values) for embedding in result.embeddings]
 
         def _should_retry(exc: Exception) -> bool:
-            if not isinstance(exc, genai_errors.ServerError):
+            if not self._is_provider_server_error(exc):
                 return False
             _logger.warning(
                 "Gemini embed_content returned %s; retrying with exponential backoff",
@@ -325,28 +327,22 @@ class GeminiEmbedder:
         # INTERNAL responses even for requests that succeed on retry. Keep this
         # retry wrapper until provider stability improves or we have a more
         # targeted transport-level workaround.
-        return retry_with_exponential_backoff(
-            _request,
-            should_retry=_should_retry,
-            max_attempts=_EMBED_RETRY_ATTEMPTS,
-        )
+        try:
+            return retry_with_exponential_backoff(
+                _request,
+                should_retry=_should_retry,
+                max_attempts=_EMBED_RETRY_ATTEMPTS,
+            )
+        except Exception as exc:
+            if self._is_provider_server_error(exc):
+                raise EmbeddingProviderError("Gemini embedding provider failed after retries") from exc
+            raise
 
     def _log_parts_summary(self, parts: list[Any]) -> None:
         summary = []
         for part in parts:
-            if isinstance(part, str):
-                summary.append(
-                    {
-                        "type": "text",
-                        "len": len(part),
-                        "sha16": hashlib.sha256(part.encode("utf-8")).hexdigest()[:16],
-                        "preview": part[:80],
-                    }
-                )
-                continue
-
-            if isinstance(part, dict) and "text" in part:
-                text = part["text"]
+            text = getattr(part, "text", None)
+            if isinstance(text, str):
                 summary.append(
                     {
                         "type": "text",
@@ -357,13 +353,13 @@ class GeminiEmbedder:
                 )
                 continue
 
-            if isinstance(part, dict) and "inline_data" in part:
-                inline = part["inline_data"]
-                data = inline.get("data", b"")
+            inline = getattr(part, "inline_data", None)
+            if inline is not None:
+                data = getattr(inline, "data", b"")
                 summary.append(
                     {
                         "type": "inline_data",
-                        "mime_type": inline.get("mime_type"),
+                        "mime_type": getattr(inline, "mime_type", None),
                         "size": len(data),
                     }
                 )
@@ -371,7 +367,7 @@ class GeminiEmbedder:
 
             summary.append({"type": type(part).__name__})
 
-        _logger.warning("embed parts summary: %s", summary)
+        _logger.debug("embed parts summary: %s", summary)
 
     def _normalize_vector(self, vector: list[float]) -> list[float]:
         if len(vector) != EMBEDDING_DIMENSIONS:
@@ -535,13 +531,13 @@ class GeminiEmbedder:
 
     def _client_obj(self):
         if self._client is None:
-            genai, _ = self._load_sdk()
+            genai, _, _ = self._load_sdk()
             self._client = genai.Client(api_key=GEMINI_API_KEY)
         return self._client
 
     def _document_config(self):
         if self._doc_config is None:
-            _, types = self._load_sdk()
+            _, types, _ = self._load_sdk()
             self._doc_config = types.EmbedContentConfig(
                 output_dimensionality=EMBEDDING_DIMENSIONS,
                 task_type="RETRIEVAL_DOCUMENT",
@@ -550,7 +546,7 @@ class GeminiEmbedder:
 
     def _query_config_obj(self):
         if self._query_config is None:
-            _, types = self._load_sdk()
+            _, types, _ = self._load_sdk()
             self._query_config = types.EmbedContentConfig(
                 output_dimensionality=EMBEDDING_DIMENSIONS,
                 task_type="RETRIEVAL_QUERY",
@@ -558,23 +554,31 @@ class GeminiEmbedder:
         return self._query_config
 
     def _make_bytes_part(self, data: bytes, mime_type: str):
-        _, types = self._load_sdk()
+        _, types, _ = self._load_sdk()
         return types.Part.from_bytes(data=data, mime_type=mime_type)
 
     def _make_text_part(self, text: str):
-        _, types = self._load_sdk()
+        _, types, _ = self._load_sdk()
         return types.Part.from_text(text=text)
 
     def _make_content(self, parts: list[Any]):
-        _, types = self._load_sdk()
+        _, types, _ = self._load_sdk()
         return types.Content(parts=parts)
 
+    def _error_types_obj(self):
+        _, _, errors = self._load_sdk()
+        return errors
+
+    def _is_provider_server_error(self, exc: Exception) -> bool:
+        return isinstance(exc, self._error_types_obj().ServerError)
+
     def _load_sdk(self):
-        if self._genai is not None and self._types is not None:
-            return self._genai, self._types
+        if self._genai is not None and self._types is not None and self._errors is not None:
+            return self._genai, self._types, self._errors
 
         try:
             from google import genai
+            from google.genai import errors
             from google.genai import types
         except ModuleNotFoundError as exc:
             raise RuntimeError(
@@ -583,4 +587,5 @@ class GeminiEmbedder:
 
         self._genai = genai
         self._types = types
-        return self._genai, self._types
+        self._errors = errors
+        return self._genai, self._types, self._errors
