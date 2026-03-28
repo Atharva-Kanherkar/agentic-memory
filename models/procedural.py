@@ -20,6 +20,8 @@ def _validate_string_list(values: list[str], *, field_name: str, allow_empty: bo
 @dataclass(kw_only=True)
 class ProceduralMemory(MemoryRecord):
     memory_type: str = "procedural"
+    # The default only satisfies dataclass field-ordering constraints.
+    # __post_init__ enforces that persisted procedures must provide at least one step.
     steps: list[str] = field(default_factory=list)
     preconditions: list[str] = field(default_factory=list)
     success_count: int = 0
