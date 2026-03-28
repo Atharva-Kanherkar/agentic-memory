@@ -1,12 +1,132 @@
 # agentic-memory
 
-A cognitive memory system for AI agents, grounded in the taxonomy from [Measuring Progress Toward AGI: A Cognitive Framework](research-docs/measuring-progress-toward-agi-a-cognitive-framework.pdf).
+A cognitive memory framework for AI agents, built on the taxonomy from [Measuring Progress Toward AGI: A Cognitive Framework](research-docs/measuring-progress-toward-agi-a-cognitive-framework.pdf).
 
-Most agent frameworks treat memory as a single vector store you dump context into. This project implements memory the way the cognitive science paper describes it: **separate stores for different memory types**, a **unified retriever** that queries across them, a **forgetting service** that prunes stale knowledge, and an **event bus** that lets future modules (working memory, learning, metacognition) subscribe without touching core code.
+Most agent memory systems are a single vector store. This project implements memory the way cognitive science describes it: **separate stores for different memory types** (semantic facts, episodic events, procedural skills), a **unified retriever** with weighted ranking, a **forgetting service** for pruning stale knowledge, and an **event bus** for lifecycle observability.
 
-Built on **Gemini Embedding 2** for natively multimodal embeddings — text, images, audio, and video share a single vector space.
+Built on **Gemini Embedding 2** for natively multimodal embeddings — text, images, audio, video, and PDFs share a single 768-dimensional vector space.
 
-> Status: Phase 1 in progress. Semantic memory write path is functional. Read path and event bus next.
+---
+
+## Quickstart
+
+### 1. Install dependencies
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Set up environment
+
+Create a `.env` file in the project root:
+
+```
+GEMINI_API_KEY=your_key_here
+```
+
+### 3. Install system dependencies
+
+Audio and video chunking requires ffmpeg:
+
+```bash
+# arch
+sudo pacman -S ffmpeg
+
+# ubuntu/debian
+sudo apt install ffmpeg
+
+# mac
+brew install ffmpeg
+```
+
+### 4. Start the API server
+
+```bash
+.venv/bin/python -m uvicorn api.app:app --port 8000 --reload
+```
+
+The API is now running at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
+
+### 5. Start the playground UI
+
+```bash
+cd web
+npm install
+NEXT_PUBLIC_MEMORY_API_BASE_URL=http://localhost:8000 npm run dev
+```
+
+The playground is now running at `http://localhost:3000`.
+
+---
+
+## CLI
+
+```bash
+# Store a semantic fact
+python demo/cli.py store "Python was created by Guido van Rossum"
+
+# Store a semantic fact with an image
+python demo/cli.py store "Architecture whiteboard from the design review" --image ./whiteboard.png
+
+# Query memories by text
+python demo/cli.py query "Who created Python?" -k 5
+
+# Query memories by image
+python demo/cli.py query-by-image ./diagram.png -k 5
+
+# Query memories by audio
+python demo/cli.py query-by-audio ./meeting.mp3 -k 5 --memory-types semantic
+
+# Store a text episodic memory
+python demo/cli.py store-episode --session session-debug --text "We fixed the ranking bug"
+
+# Store a file-backed episodic memory
+python demo/cli.py store-episode --session session-review --file ./screenshot.png --modality image
+
+# Store a multimodal episodic memory
+python demo/cli.py store-episode --session session-handoff --file ./notes.pdf --modality multimodal
+
+# Show recent episodes
+python demo/cli.py recent 5
+```
+
+---
+
+## API
+
+### Memory storage
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/memories/semantic` | Store a semantic fact (text or media-backed) |
+| POST | `/api/memories/episodic/text` | Store a text episodic memory |
+| POST | `/api/memories/episodic/file` | Store a file-backed episodic memory |
+
+### Retrieval
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/retrieval/query` | Text query with ranked results |
+| POST | `/api/retrieval/query-by-image` | Image upload query (file upload, returns ranked results) |
+| POST | `/api/retrieval/query-by-audio` | Audio upload query (file upload, returns ranked results) |
+
+### Exploration
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/episodes/recent?n=5` | Recent episodic memories |
+| GET | `/api/episodes/session/{id}` | All episodes in a session |
+| GET | `/api/episodes/time-range?start=...&end=...` | Episodes in a time window |
+
+### System
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/overview` | Collection counts, recent sessions, latest events |
+| GET | `/api/events?limit=40` | Event stream (stored, retrieved, ranked, accessed) |
+| GET | `/health` | Health check |
 
 ---
 
@@ -15,34 +135,39 @@ Built on **Gemini Embedding 2** for natively multimodal embeddings — text, ima
 ```mermaid
 graph TB
     subgraph "Phase 1 — Memory System"
-        CLI["demo/cli.py"]
+        CLI["CLI"]
+        API["FastAPI"]
+        UI["Playground UI"]
         EMB["GeminiEmbedder"]
+        MS["MediaStore"]
         SS["SemanticStore"]
         ES["EpisodicStore"]
         PS["ProceduralStore"]
         RET["UnifiedRetriever"]
+        RNK["Weighted Ranker"]
         FGT["ForgettingService"]
         BUS["EventBus"]
         DB[(ChromaDB)]
 
         CLI --> SS
         CLI --> ES
-        CLI --> PS
+        CLI --> EMB
+        API --> SS
+        API --> ES
+        API --> EMB
+        UI --> API
         SS --> EMB
         ES --> EMB
-        PS --> EMB
+        SS --> MS
+        ES --> MS
         SS --> DB
         ES --> DB
-        PS --> DB
         RET --> SS
         RET --> ES
-        RET --> PS
-        FGT --> SS
-        FGT --> ES
-        FGT --> PS
+        RET --> RNK
         SS -.->|emit| BUS
         ES -.->|emit| BUS
-        PS -.->|emit| BUS
+        RET -.->|emit| BUS
     end
 
     subgraph "Phase 2 — Working Memory + Learning"
@@ -58,14 +183,18 @@ graph TB
     end
 
     style SS fill:#2d6a4f,color:#fff
+    style ES fill:#2d6a4f,color:#fff
     style EMB fill:#2d6a4f,color:#fff
+    style MS fill:#2d6a4f,color:#fff
     style CLI fill:#2d6a4f,color:#fff
+    style API fill:#2d6a4f,color:#fff
+    style UI fill:#2d6a4f,color:#fff
     style DB fill:#2d6a4f,color:#fff
-    style ES fill:#555,color:#aaa
+    style RET fill:#2d6a4f,color:#fff
+    style RNK fill:#2d6a4f,color:#fff
+    style BUS fill:#2d6a4f,color:#fff
     style PS fill:#555,color:#aaa
-    style RET fill:#555,color:#aaa
     style FGT fill:#555,color:#aaa
-    style BUS fill:#555,color:#aaa
     style WM fill:#333,color:#666
     style LRN fill:#333,color:#666
     style META fill:#333,color:#666
@@ -75,273 +204,155 @@ Green = built. Grey = planned (Phase 1). Dark = future phases.
 
 ---
 
-## Memory Types
+## Memory types
 
-The paper identifies distinct memory sub-types that behave differently — different decay rates, retrieval patterns, and update semantics. This project implements them as separate ChromaDB collections behind a shared interface.
+The cognitive framework distinguishes memory sub-types with different storage, retrieval, and decay semantics. Each type is a separate ChromaDB collection behind a shared `BaseStore` interface.
 
-```mermaid
-classDiagram
-    class MemoryRecord {
-        +str content
-        +str memory_type
-        +str modality
-        +str id
-        +datetime created_at
-        +float importance
-        +list~float~ embedding
-        +str media_ref
-    }
-    class SemanticMemory {
-        +str category
-        +float confidence
-        +str supersedes
-        +list~str~ related_ids
-    }
-    class EpisodicMemory {
-        +str context
-        +float emotional_valence
-        +str session_id
-    }
-    class ProceduralMemory {
-        +str trigger
-        +list~str~ steps
-        +int execution_count
-    }
-    MemoryRecord <|-- SemanticMemory
-    MemoryRecord <|-- EpisodicMemory
-    MemoryRecord <|-- ProceduralMemory
+| Type | Store | Purpose | Status |
+|------|-------|---------|--------|
+| **Semantic** | `SemanticStore` | Facts, knowledge, concepts | Built |
+| **Episodic** | `EpisodicStore` | Events, experiences, sessions | Built |
+| **Procedural** | `ProceduralStore` | Skills, tool sequences, strategies | Planned |
+
+All stores support text and multimodal (image, audio, video, PDF) records.
+
+---
+
+## Multimodal support
+
+All modalities are embedded into the same 768-dimensional vector space via [Gemini Embedding 2](https://ai.google.dev/gemini-api/docs/embeddings).
+
+| Modality | Storage | Text query | Media query |
+|----------|---------|------------|-------------|
+| Text | Semantic, Episodic | Yes | — |
+| Image | Semantic, Episodic | Via content label | query-by-image |
+| Audio | Semantic, Episodic | Via content label | query-by-audio |
+| Video | Episodic | Via content label | — |
+| PDF | Episodic (multimodal) | Via content label | — |
+
+Long audio (>80s) and long video (>120s) are automatically chunked, embedded per-chunk, averaged, and re-normalized.
+
+Media files are copied into an app-owned directory (`data/media/`) with structured subdirectories (images, audio, video, documents). The `MediaStore` handles lifecycle, ownership validation, and cleanup on failure.
+
+---
+
+## Retrieval pipeline
+
+The `UnifiedRetriever` queries across all stores and applies weighted ranking:
+
+```
+query → fan-out to stores (3x over-fetch) → collect candidates →
+  rank by (relevance × 0.4 + recency × 0.3 + importance × 0.3) →
+  truncate to top_k → update access tracking → emit events → return
+```
+
+Both text queries and vector queries (from image/audio embeddings) flow through the same pipeline. Vector queries bypass the embedder and go directly to the stores via `retrieve_by_vector()`.
+
+---
+
+## Event system
+
+All store and retrieval operations emit events through the `EventBus`:
+
+| Event | When |
+|-------|------|
+| `memory.stored` | After a record is persisted |
+| `memory.retrieved` | After candidates are fetched (pre-ranking) |
+| `memory.ranked` | After ranking is applied |
+| `memory.accessed` | After access count is updated |
+
+Events are immutable (frozen payloads) and visible in the playground UI's event stream and via `GET /api/events`.
+
+---
+
+## Testing
+
+All tests run offline with deterministic embedders (no Gemini API key required):
+
+```bash
+# Run all tests
+.venv/bin/python -m pytest tests/
+
+# Individual test files
+.venv/bin/python tests/test_semantic_store.py
+.venv/bin/python tests/test_episodic_store.py
+.venv/bin/python tests/test_retriever.py
+.venv/bin/python tests/test_event_integration.py
+.venv/bin/python tests/test_media_store.py
+.venv/bin/python tests/test_cli.py
+.venv/bin/python -m pytest tests/test_api.py
+
+# Offline episodic evaluation harness
+.venv/bin/python tests/test_offline_episodic_eval.py
 ```
 
 ---
 
-## Write Path
-
-How a memory goes from raw content to a persisted vector:
-
-```mermaid
-sequenceDiagram
-    participant C as CLI
-    participant S as SemanticStore
-    participant E as GeminiEmbedder
-    participant G as Gemini API
-    participant D as ChromaDB
-
-    C->>S: store(SemanticMemory)
-    S->>E: embed_text(content)
-    E->>G: embed_content(text, 768 dims)
-    G-->>E: [0.023, -0.41, 0.87, ...]
-    E-->>S: embedding vector
-    S->>D: add(id, embedding, metadata)
-    D-->>S: persisted
-    S-->>C: record_id
-```
-
----
-
-## Multimodal Embeddings
-
-All modalities go through the same `GeminiEmbedder` and land in the same vector space. A text query can retrieve an image memory. An audio clip can be compared to text descriptions.
-
-```mermaid
-graph LR
-    T["text"] -->|embed_text| EMB["GeminiEmbedder"]
-    I["image bytes"] -->|embed_image| EMB
-    A["audio bytes"] -->|embed_audio| EMB
-    EMB --> V["768-dim vector space"]
-
-    style V fill:#2d6a4f,color:#fff
-```
-
-The embedding model is [Gemini Embedding 2](https://ai.google.dev/gemini-api/docs/embeddings) — natively multimodal, mapping text, images, audio, and video into a single embedding space. Matryoshka support allows truncation from 3072 down to 768 dimensions with minimal accuracy loss.
-
----
-
-## Experiment: Cross-Modal Emotion in Audio
-
-We ran an experiment to test whether audio embeddings encode emotional tone or just acoustic structure. Four songs across three languages (English, Hindi, Arabic), embedded as raw bytes with no metadata passed to the model.
-
-```mermaid
-graph LR
-    subgraph "Audio Pipeline"
-        SONG["song.mp3"] -->|ffmpeg| CHUNKS["60s chunks"]
-        CHUNKS -->|embed_audio| VECS["chunk vectors"]
-        VECS -->|average| AV["song vector"]
-    end
-
-    subgraph "Probe Vectors"
-        P1["grief / loss"]
-        P2["melancholy"]
-        P3["joy / happiness"]
-        P4["peaceful / calm"]
-        P5["tension / dread"]
-        P6["neutral"]
-    end
-
-    AV -->|cosine similarity| SCORES["ranked scores"]
-    P1 --> SCORES
-    P2 --> SCORES
-    P3 --> SCORES
-```
-
-**Results summary:**
-
-| Song | Genre | Language | Top Match | Runner-up |
-|---|---|---|---|---|
-| Schindler's List Theme | Orchestral | Instrumental | melancholy (0.70) | grief (0.68) |
-| Phir Se | Bollywood | Hindi | grief (0.69) | melancholy (0.69) |
-| Rasputin | Disco-pop | English | joy (0.69) | tension (0.67) |
-| Didi | Rai | Arabic/French | joy (0.66) | melancholy (0.63) |
-
-The model correctly separated sad from happy songs, made nuanced distinctions within each cluster (melancholy vs. grief, joy vs. tension), and worked cross-lingually on raw audio bytes with no transcription.
-
-Grief ranked last on both happy songs. Neutral ranked last on both sad songs. The largest winner-to-loser gap was 0.087 (Phir Se: grief vs. neutral).
-
-Full methodology and analysis: [`experiments/audio_emotion_probe_results.md`](experiments/audio_emotion_probe_results.md)
-
-**Architectural implication:** `emotional_valence` on episodic memories can be derived directly from the embedding — no separate sentiment analysis pipeline needed.
-
----
-
-## Project Structure
+## Project structure
 
 ```
 agentic-memory/
-├── config.py                  # API keys, model config, ChromaDB path
+├── config.py                  # API keys, model config, paths
 ├── models/
-│   ├── base.py                # MemoryRecord dataclass
-│   └── semantic.py            # SemanticMemory (factual knowledge)
+│   ├── base.py                # MemoryRecord dataclass, modality normalization
+│   ├── semantic.py            # SemanticMemory (facts, knowledge)
+│   └── episodic.py            # EpisodicMemory (events, sessions)
 ├── utils/
-│   └── embeddings.py          # GeminiEmbedder — text, image, audio
+│   ├── embeddings.py          # GeminiEmbedder — text, image, audio, video, PDF, multimodal
+│   └── retry.py               # Exponential backoff with jitter
 ├── stores/
 │   ├── base.py                # Abstract BaseStore interface
-│   └── semantic_store.py      # ChromaDB-backed semantic store
-├── retrieval/                  # (planned) Unified cross-store retriever
-├── events/                     # (planned) Event bus for store/retrieve signals
+│   ├── semantic_store.py      # ChromaDB-backed semantic store
+│   ├── episodic_store.py      # ChromaDB-backed episodic store
+│   └── media_store.py         # Local file storage with ownership tracking
+├── retrieval/
+│   ├── retriever.py           # UnifiedRetriever — fan-out, ranking, access tracking
+│   └── ranking.py             # Weighted scoring (relevance, recency, importance)
+├── events/
+│   ├── bus.py                 # Synchronous pub/sub EventBus
+│   └── logger.py              # Console event formatter
 ├── api/
-│   └── app.py                 # FastAPI boundary over stores/retriever/events
+│   └── app.py                 # FastAPI server — storage, retrieval, events, overview
 ├── demo/
-│   └── cli.py                 # CLI for storing and querying memories
-├── web/                       # Next.js playground UI for memory workflows
-├── experiments/
-│   ├── audio_emotion_probe.py           # Cross-modal emotion probe script
-│   └── audio_emotion_probe_results.md   # Full results and analysis
-├── media/                      # Audio/image files (not committed)
-└── research-docs/
-    └── measuring-progress-toward-agi-a-cognitive-framework.pdf
+│   └── cli.py                 # CLI for all memory operations
+├── web/                       # Next.js playground UI
+├── tests/                     # Offline deterministic test suite
+├── experiments/               # Audio emotion probes, benchmarks
+├── docs/                      # Issue plans, evaluation docs
+└── research-docs/             # Source papers
 ```
 
 ---
 
-## Setup
+## Theoretical foundation
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Create a `.env` file:
-```
-GEMINI_API_KEY=your_key_here
-```
-
-System dependency for audio chunking:
-```bash
-# arch
-sudo pacman -S ffmpeg
-
-# ubuntu/debian
-sudo apt install ffmpeg
-```
-
-## API
-
-Run the Python API locally:
-
-```bash
-.venv/bin/python -m uvicorn api.app:app --reload
-```
-
-Key routes:
-
-- `POST /api/memories/semantic`
-- `POST /api/memories/episodic/text`
-- `POST /api/memories/episodic/file`
-- `POST /api/retrieval/query`
-- `GET /api/episodes/recent`
-- `GET /api/episodes/session/{session_id}`
-- `GET /api/episodes/time-range`
-- `GET /api/events`
-- `GET /api/overview`
-
-Interactive docs:
-
-- `http://localhost:8000/docs`
-
-## Playground UI
-
-The repository now includes a Next.js playground in `web/` that talks to the Python API.
-
-```bash
-cd web
-npm install
-NEXT_PUBLIC_MEMORY_API_BASE_URL=http://localhost:8000 npm run dev
-```
-
-For a Vercel deployment such as `memory.agentclash.dev`, set:
-
-```bash
-NEXT_PUBLIC_MEMORY_API_BASE_URL=<your deployed Python API base URL>
-```
-
----
-
-## Usage
-
-Store a fact:
-```bash
-python demo/cli.py store "Python was created by Guido van Rossum"
-```
-
-Run the audio emotion probe:
-```bash
-python experiments/audio_emotion_probe.py "song.mp3"
-```
-
----
-
-## Offline Evaluation
-
-The repo now includes a deterministic offline episodic-memory evaluation harness
-for fixed synthetic fixtures across mixed-store retrieval, temporal recall,
-session reconstruction, recent-event lookup, and cross-modal media-backed
-episodes.
-
-Run it with:
-
-```bash
-pytest tests/test_offline_episodic_eval.py
-```
-
-or:
-
-```bash
-python tests/test_offline_episodic_eval.py
-```
-
-Benchmark mapping and rationale: [`docs/offline_episodic_eval.md`](docs/offline_episodic_eval.md)
-
----
-
-## Theoretical Foundation
-
-This project is built on the cognitive taxonomy from the DeepMind paper *Measuring Progress Toward AGI*. The paper distinguishes three faculties that most agent frameworks conflate:
+This project implements the cognitive taxonomy from the DeepMind paper *Measuring Progress Toward AGI*. The paper distinguishes three faculties that most agent frameworks conflate:
 
 - **Memory** — passive storage and retrieval (semantic facts, episodic events, procedural skills)
-- **Working Memory** — active manipulation of information for a current goal (sits under Executive Functions, not Memory)
+- **Working Memory** — active manipulation of information for a current goal
 - **Learning** — acquisition and consolidation of new knowledge into long-term memory
 
-The architecture implements these as separate systems. Phase 1 builds the memory stores. Phase 2 adds working memory (an active scratchpad) and a learning module (consolidation from working memory to long-term stores). Phase 3 adds metacognitive monitoring — the system's ability to assess confidence in its own retrieved context.
+Phase 1 builds the memory stores. Phase 2 adds working memory and a learning module. Phase 3 adds metacognitive monitoring — the system's ability to assess confidence in its own retrieved context.
+
+---
+
+## Roadmap
+
+- [x] Semantic memory store (text + multimodal)
+- [x] Episodic memory store (text + file-backed + multimodal)
+- [x] Unified retriever with weighted ranking
+- [x] Event bus with lifecycle events
+- [x] Media store with ownership tracking
+- [x] Cross-modal retrieval (query by image, query by audio)
+- [x] CLI with full multimodal support
+- [x] FastAPI with storage, retrieval, and event endpoints
+- [x] Playground UI with text, image, and audio queries
+- [ ] PDF chunk-level retrieval ([#30](https://github.com/agentclash/agentic-memory/issues/30))
+- [ ] Procedural memory store
+- [ ] Forgetting service
+- [ ] Working memory (Phase 2)
+- [ ] Learning module (Phase 2)
+- [ ] Metacognitive monitoring (Phase 3)
 
 ---
 
