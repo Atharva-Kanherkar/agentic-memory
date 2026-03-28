@@ -15,6 +15,13 @@ export type MemoryRecord = {
   source_mime_type?: string | null;
   category?: string;
   confidence?: number;
+  steps?: string[];
+  preconditions?: string[];
+  success_count?: number;
+  failure_count?: number;
+  total_outcomes?: number;
+  success_rate?: number;
+  wilson_score?: number;
 };
 
 export type RankedQueryResult = {
@@ -34,8 +41,16 @@ export type PlaygroundEvent = {
 export type Overview = {
   semantic_count: number;
   episodic_count: number;
+  procedural_count: number;
   recent_sessions: string[];
   latest_events: PlaygroundEvent[];
+};
+
+export type ProceduralMatchResult = {
+  record: MemoryRecord;
+  similarity: number;
+  wilson_score: number;
+  combined_score: number;
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_MEMORY_API_BASE_URL ?? "http://localhost:8000";
@@ -148,6 +163,35 @@ export function queryByAudio(input: { file: File; top_k?: number; memory_types?:
   return request<MediaQueryResult>("/api/retrieval/query-by-audio", {
     method: "POST",
     body: formData,
+  });
+}
+
+export function createProcedure(input: {
+  content: string;
+  steps: string[];
+  preconditions?: string[];
+  importance?: number;
+}) {
+  return request<{ record: MemoryRecord }>("/api/memories/procedural", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function recordOutcome(recordId: string, success: boolean) {
+  return request<{ record: MemoryRecord }>(
+    `/api/memories/procedural/${encodeURIComponent(recordId)}/outcome`,
+    {
+      method: "POST",
+      body: JSON.stringify({ success }),
+    },
+  );
+}
+
+export function getBestProcedures(input: { task: string; top_k?: number }) {
+  return request<{ results: ProceduralMatchResult[] }>("/api/retrieval/best-procedures", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

@@ -581,8 +581,8 @@ def create_app(
 
     @app.post("/api/memories/procedural/file")
     async def create_file_procedure(
-        content: str = Form(...),
-        steps: list[str] = Form(...),
+        content: str | None = Form(default=None),
+        steps: list[str] | None = Form(default=None),
         preconditions: list[str] | None = Form(default=None),
         modality: str | None = Form(default=None),
         media_type: str | None = Form(default=None),
@@ -590,6 +590,8 @@ def create_app(
         importance: float = Form(default=0.5),
         file: UploadFile = File(...),
     ) -> dict[str, Any]:
+        if not content or not content.strip():
+            raise HTTPException(status_code=400, detail="content is required")
         inferred_contract = _infer_media_contract(mime_type=file.content_type, filename=file.filename)
         inferred_modality = inferred_contract[0] if inferred_contract else None
         inferred_media_type = inferred_contract[1] if inferred_contract else None

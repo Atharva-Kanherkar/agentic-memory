@@ -19,6 +19,7 @@
   --accent-warm: #c4956a;
   --semantic-clr: #c9a87c;
   --episodic-clr: #7d9b8a;
+  --procedural-clr: #9b8ac4;
 }
 
 /* ------------------------------------------------------------------ */
@@ -156,6 +157,11 @@ textarea {
 .badge-episodic {
   background: rgba(125, 155, 138, 0.12);
   color: var(--episodic-clr);
+}
+
+.badge-procedural {
+  background: rgba(155, 138, 196, 0.12);
+  color: var(--procedural-clr);
 }
 
 /* ------------------------------------------------------------------ */

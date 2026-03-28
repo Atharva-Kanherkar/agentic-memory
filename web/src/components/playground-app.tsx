@@ -16,18 +16,25 @@ import {
   History,
   Image,
   Layers3,
+  ListChecks,
   Music,
+  Plus,
   RefreshCcw,
   Search,
   Signal,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
   Type,
   Zap,
 } from "lucide-react";
 import {
   checkHealth,
   createFileEpisode,
+  createProcedure,
   createSemanticMemory,
   createTextEpisode,
+  getBestProcedures,
   getEvents,
   getOverview,
   getRecentEpisodes,
@@ -36,10 +43,12 @@ import {
   type MemoryRecord,
   type Overview,
   type PlaygroundEvent,
+  type ProceduralMatchResult,
   queryByAudio,
   queryByImage,
   queryMemories,
   type RankedQueryResult,
+  recordOutcome,
 } from "@/lib/api";
 
 /* ------------------------------------------------------------------ */
@@ -48,9 +57,9 @@ import {
 
 type Notice = { tone: "ok" | "error"; text: string } | null;
 type SidebarTab = "store" | "explore";
-type StoreMode = "semantic" | "text" | "file";
+type StoreMode = "semantic" | "text" | "file" | "procedure";
 type ExploreMode = "recent" | "session" | "time";
-type QueryMode = "text" | "image" | "audio";
+type QueryMode = "text" | "image" | "audio" | "best-procedure";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -114,7 +123,8 @@ function HealthDot({ status }: { status: "checking" | "ok" | "error" }) {
 }
 
 function TypeBadge({ type }: { type: string }) {
-  const cls = type === "semantic" ? "badge-semantic" : "badge-episodic";
+  const cls =
+    type === "semantic" ? "badge-semantic" : type === "procedural" ? "badge-procedural" : "badge-episodic";
   return (
     <span
       className={`${cls} inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider`}
@@ -320,7 +330,82 @@ function FileDropZone({
 /*  Result cards                                                       */
 /* ------------------------------------------------------------------ */
 
-function ResultCard({ result }: { result: RankedQueryResult }) {
+function ProceduralDetails({ record }: { record: MemoryRecord }) {
+  if (record.memory_type !== "procedural") return null;
+  return (
+    <>
+      {record.steps && record.steps.length > 0 && (
+        <div className="space-y-1">
+          <span className="text-[10px] uppercase tracking-wider text-[var(--text-4)]">Steps</span>
+          <ol className="list-inside list-decimal space-y-0.5 text-[12px] leading-5 text-[var(--text-2)]">
+            {record.steps.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+      {record.preconditions && record.preconditions.length > 0 && (
+        <div className="space-y-1">
+          <span className="text-[10px] uppercase tracking-wider text-[var(--text-4)]">Preconditions</span>
+          <ul className="list-inside list-disc space-y-0.5 text-[12px] leading-5 text-[var(--text-3)]">
+            {record.preconditions.map((pc, i) => (
+              <li key={i}>{pc}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="flex items-center gap-3 text-[10px] text-[var(--text-4)]">
+        <span>outcomes: {record.total_outcomes ?? 0}</span>
+        <span>success: {record.success_count ?? 0}</span>
+        <span>failure: {record.failure_count ?? 0}</span>
+        {record.wilson_score != null && <span>wilson: {record.wilson_score.toFixed(3)}</span>}
+      </div>
+    </>
+  );
+}
+
+function OutcomeButtons({
+  recordId,
+  onOutcome,
+  disabled,
+}: {
+  recordId: string;
+  onOutcome: (recordId: string, success: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => onOutcome(recordId, true)}
+        disabled={disabled}
+        className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-emerald-400/70 transition hover:bg-emerald-500/10 disabled:opacity-50"
+      >
+        <ThumbsUp className="size-3" />
+        Success
+      </button>
+      <button
+        type="button"
+        onClick={() => onOutcome(recordId, false)}
+        disabled={disabled}
+        className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-red-400/70 transition hover:bg-red-500/10 disabled:opacity-50"
+      >
+        <ThumbsDown className="size-3" />
+        Failure
+      </button>
+    </div>
+  );
+}
+
+function ResultCard({
+  result,
+  onOutcome,
+  busy,
+}: {
+  result: RankedQueryResult;
+  onOutcome?: (recordId: string, success: boolean) => void;
+  busy?: boolean;
+}) {
   const { record } = result;
   return (
     <div className="glass-border space-y-3 rounded-2xl bg-[var(--surface)] p-5">
@@ -331,6 +416,7 @@ function ResultCard({ result }: { result: RankedQueryResult }) {
       {record.summary && (
         <p className="text-[12px] italic leading-5 text-[var(--text-3)]">{record.summary}</p>
       )}
+      <ProceduralDetails record={record} />
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--text-4)]">
         <span>{record.modality}</span>
         {record.session_id && (
@@ -357,6 +443,55 @@ function ResultCard({ result }: { result: RankedQueryResult }) {
         <div className="mt-1.5 border-t border-[var(--border)] pt-1.5">
           <ScoreBar label="final" value={result.final_score} accent />
         </div>
+      </div>
+      {record.memory_type === "procedural" && onOutcome && (
+        <div className="border-t border-[var(--border)] pt-2">
+          <OutcomeButtons recordId={record.id} onOutcome={onOutcome} disabled={busy} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProceduralMatchCard({
+  match,
+  onOutcome,
+  busy,
+}: {
+  match: ProceduralMatchResult;
+  onOutcome: (recordId: string, success: boolean) => void;
+  busy?: boolean;
+}) {
+  const { record } = match;
+  return (
+    <div className="glass-border space-y-3 rounded-2xl bg-[var(--surface)] p-5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="flex-1 text-sm leading-relaxed text-[var(--text-1)]">{record.content}</p>
+        <TypeBadge type="procedural" />
+      </div>
+      <ProceduralDetails record={record} />
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--text-4)]">
+        <span>{record.modality}</span>
+        {record.media_ref && (
+          <>
+            <span>·</span>
+            <span>{shortMediaRef(record.media_ref)}</span>
+          </>
+        )}
+        <span>·</span>
+        <span>{formatDate(record.created_at)}</span>
+        <span>·</span>
+        <span>{record.access_count}× accessed</span>
+      </div>
+      <div className="space-y-1.5 pt-1">
+        <ScoreBar label="similarity" value={match.similarity} />
+        <ScoreBar label="wilson" value={match.wilson_score} />
+        <div className="mt-1.5 border-t border-[var(--border)] pt-1.5">
+          <ScoreBar label="combined" value={match.combined_score} accent />
+        </div>
+      </div>
+      <div className="border-t border-[var(--border)] pt-2">
+        <OutcomeButtons recordId={record.id} onOutcome={onOutcome} disabled={busy} />
       </div>
     </div>
   );
@@ -504,13 +639,20 @@ export function PlaygroundApp() {
   const [epiFile, setEpiFile] = useState<File | null>(null);
   const [epiFileContent, setEpiFileContent] = useState("");
 
+  /* ---- procedural form ---- */
+  const [procContent, setProcContent] = useState("");
+  const [procSteps, setProcSteps] = useState<string[]>([""]);
+  const [procPreconditions, setProcPreconditions] = useState<string[]>([]);
+  const [procImportance, setProcImportance] = useState(0.5);
+
   /* ---- query ---- */
   const [queryMode, setQueryMode] = useState<QueryMode>("text");
   const [queryText, setQueryText] = useState("");
   const [queryFile, setQueryFile] = useState<File | null>(null);
   const [topK, setTopK] = useState(6);
-  const [queryTypeFilter, setQueryTypeFilter] = useState<"all" | "semantic" | "episodic">("all");
+  const [queryTypeFilter, setQueryTypeFilter] = useState<"all" | "semantic" | "episodic" | "procedural">("all");
   const [queryResults, setQueryResults] = useState<RankedQueryResult[]>([]);
+  const [bestProcResults, setBestProcResults] = useState<ProceduralMatchResult[]>([]);
   const [querySubmitted, setQuerySubmitted] = useState(false);
 
   /* ---- explore ---- */
@@ -640,6 +782,44 @@ export function PlaygroundApp() {
     }
   }
 
+  async function handleStoreProcedure(e: FormEvent) {
+    e.preventDefault();
+    const cleanSteps = procSteps.map((s) => s.trim()).filter(Boolean);
+    const cleanPreconditions = procPreconditions.map((s) => s.trim()).filter(Boolean);
+    if (!procContent.trim() || cleanSteps.length === 0) return;
+    const result = await withBusy("Storing procedure", () =>
+      createProcedure({
+        content: procContent.trim(),
+        steps: cleanSteps,
+        preconditions: cleanPreconditions.length > 0 ? cleanPreconditions : undefined,
+        importance: procImportance,
+      }),
+    );
+    if (result) {
+      setProcContent("");
+      setProcSteps([""]);
+      setProcPreconditions([]);
+      setProcImportance(0.5);
+      setNotice({ tone: "ok", text: `Stored procedure ${result.record.id.slice(0, 8)}` });
+    }
+  }
+
+  async function handleRecordOutcome(recordId: string, success: boolean) {
+    const result = await withBusy(success ? "Recording success" : "Recording failure", () =>
+      recordOutcome(recordId, success),
+    );
+    if (result) {
+      setNotice({
+        tone: "ok",
+        text: `${success ? "Success" : "Failure"} recorded — wilson=${result.record.wilson_score?.toFixed(3)}`,
+      });
+      // Refresh results to reflect updated scores
+      if (queryMode === "best-procedure" && queryText.trim()) {
+        void runBestProcedures(queryText);
+      }
+    }
+  }
+
   async function storeExampleFact(content: string, category: string) {
     const result = await withBusy("Storing example", () =>
       createSemanticMemory({ content, category }),
@@ -669,6 +849,7 @@ export function PlaygroundApp() {
     );
     if (result) {
       setQueryResults(result.results);
+      setBestProcResults([]);
       setQuerySubmitted(true);
       setNotice({ tone: "ok", text: `${result.results.length} results` });
     }
@@ -685,8 +866,22 @@ export function PlaygroundApp() {
     );
     if (result) {
       setQueryResults(result.results);
+      setBestProcResults([]);
       setQuerySubmitted(true);
       setNotice({ tone: "ok", text: `${result.results.length} results via ${modality}` });
+    }
+  }
+
+  async function runBestProcedures(task: string) {
+    if (!task.trim()) return;
+    const result = await withBusy("Finding best procedures", () =>
+      getBestProcedures({ task: task.trim(), top_k: topK }),
+    );
+    if (result) {
+      setBestProcResults(result.results);
+      setQueryResults([]);
+      setQuerySubmitted(true);
+      setNotice({ tone: "ok", text: `${result.results.length} procedures` });
     }
   }
 
@@ -694,6 +889,8 @@ export function PlaygroundApp() {
     e?.preventDefault();
     if (queryMode === "text") {
       void runQuery(queryText);
+    } else if (queryMode === "best-procedure") {
+      void runBestProcedures(queryText);
     } else if (queryFile) {
       void runMediaQuery(queryFile, queryMode);
     }
@@ -775,6 +972,10 @@ export function PlaygroundApp() {
               <span className="text-[var(--text-2)]">{overview?.episodic_count ?? "—"}</span>
             </span>
             <span>
+              proc{" "}
+              <span className="text-[var(--text-2)]">{overview?.procedural_count ?? "—"}</span>
+            </span>
+            <span>
               sess{" "}
               <span className="text-[var(--text-2)]">
                 {overview?.recent_sessions.length ?? "—"}
@@ -842,6 +1043,9 @@ export function PlaygroundApp() {
                 </TabButton>
                 <TabButton active={storeMode === "file"} onClick={() => setStoreMode("file")}>
                   File ep.
+                </TabButton>
+                <TabButton active={storeMode === "procedure"} onClick={() => setStoreMode("procedure")}>
+                  Procedure
                 </TabButton>
               </div>
 
@@ -971,6 +1175,97 @@ export function PlaygroundApp() {
                   <SubmitButton disabled={isBusy}>
                     <FileUp className="size-3.5" />
                     Store file episode
+                  </SubmitButton>
+                </form>
+              )}
+
+              {/* Procedure form */}
+              {storeMode === "procedure" && (
+                <form className="space-y-4 p-5" onSubmit={handleStoreProcedure}>
+                  <div>
+                    <FormLabel>Task description</FormLabel>
+                    <FieldTextarea
+                      placeholder="Deploy Python app to AWS Lambda via SAM"
+                      value={procContent}
+                      onChange={(e) => setProcContent(e.target.value)}
+                      rows={2}
+                    />
+                  </div>
+                  <div>
+                    <FormLabel>Steps</FormLabel>
+                    <div className="space-y-2">
+                      {procSteps.map((step, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="mono-numeric w-5 shrink-0 text-right text-[10px] text-[var(--text-4)]">
+                            {i + 1}.
+                          </span>
+                          <FieldInput
+                            placeholder={`Step ${i + 1}`}
+                            value={step}
+                            onChange={(e) => {
+                              const next = [...procSteps];
+                              next[i] = e.target.value;
+                              setProcSteps(next);
+                            }}
+                          />
+                          {procSteps.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setProcSteps(procSteps.filter((_, j) => j !== i))}
+                              className="shrink-0 text-[var(--text-4)] hover:text-red-400"
+                            >
+                              <Trash2 className="size-3" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setProcSteps([...procSteps, ""])}
+                        className="flex items-center gap-1.5 text-[11px] text-[var(--text-3)] hover:text-[var(--text-1)]"
+                      >
+                        <Plus className="size-3" />
+                        Add step
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <FormLabel>Preconditions (optional)</FormLabel>
+                    <div className="space-y-2">
+                      {procPreconditions.map((pc, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <FieldInput
+                            placeholder={`Precondition ${i + 1}`}
+                            value={pc}
+                            onChange={(e) => {
+                              const next = [...procPreconditions];
+                              next[i] = e.target.value;
+                              setProcPreconditions(next);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setProcPreconditions(procPreconditions.filter((_, j) => j !== i))}
+                            className="shrink-0 text-[var(--text-4)] hover:text-red-400"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setProcPreconditions([...procPreconditions, ""])}
+                        className="flex items-center gap-1.5 text-[11px] text-[var(--text-3)] hover:text-[var(--text-1)]"
+                      >
+                        <Plus className="size-3" />
+                        Add precondition
+                      </button>
+                    </div>
+                  </div>
+                  <ImportanceSlider value={procImportance} onChange={setProcImportance} />
+                  <SubmitButton disabled={isBusy || !procContent.trim() || procSteps.every((s) => !s.trim())}>
+                    <ListChecks className="size-3.5" />
+                    Store procedure
                   </SubmitButton>
                 </form>
               )}
@@ -1109,26 +1404,40 @@ export function PlaygroundApp() {
                   <Music className="size-3" />
                   Audio
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { setQueryMode("best-procedure"); setQueryFile(null); }}
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider transition ${
+                    queryMode === "best-procedure"
+                      ? "bg-white/[0.08] text-[var(--text-1)]"
+                      : "text-[var(--text-4)] hover:bg-white/[0.03] hover:text-[var(--text-2)]"
+                  }`}
+                >
+                  <ListChecks className="size-3" />
+                  Best proc.
+                </button>
               </div>
 
-              {/* Text input */}
-              {queryMode === "text" && (
+              {/* Text input (for text and best-procedure modes) */}
+              {(queryMode === "text" || queryMode === "best-procedure") && (
                 <div className="flex items-center gap-3">
                   <div className="relative flex-1">
                     <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--text-4)]" />
                     <input
                       className="field-input pl-10"
-                      placeholder="Query your memories..."
+                      placeholder={queryMode === "best-procedure" ? "Describe the task..." : "Query your memories..."}
                       value={queryText}
                       onChange={(e) => setQueryText(e.target.value)}
                     />
                   </div>
-                  <SubmitButton disabled={isBusy}>Search</SubmitButton>
+                  <SubmitButton disabled={isBusy}>
+                    {queryMode === "best-procedure" ? "Find" : "Search"}
+                  </SubmitButton>
                 </div>
               )}
 
               {/* Media file input */}
-              {queryMode !== "text" && (
+              {(queryMode === "image" || queryMode === "audio") && (
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
                     <FileDropZone file={queryFile} onFile={setQueryFile} />
@@ -1164,13 +1473,14 @@ export function PlaygroundApp() {
                   <select
                     value={queryTypeFilter}
                     onChange={(e) =>
-                      setQueryTypeFilter(e.target.value as "all" | "semantic" | "episodic")
+                      setQueryTypeFilter(e.target.value as "all" | "semantic" | "episodic" | "procedural")
                     }
                     className="field-select"
                   >
                     <option value="all">all</option>
                     <option value="semantic">semantic only</option>
                     <option value="episodic">episodic only</option>
+                    <option value="procedural">procedural only</option>
                   </select>
                 </div>
                 {busyLabel && (
@@ -1191,13 +1501,35 @@ export function PlaygroundApp() {
                   Query results · {queryResults.length} hits
                 </p>
                 {queryResults.map((r) => (
-                  <ResultCard key={r.record.id} result={r} />
+                  <ResultCard
+                    key={r.record.id}
+                    result={r}
+                    onOutcome={handleRecordOutcome}
+                    busy={isBusy}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Best procedure results */}
+            {bestProcResults.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-4)]">
+                  Best procedures · {bestProcResults.length} matches
+                </p>
+                {bestProcResults.map((m) => (
+                  <ProceduralMatchCard
+                    key={m.record.id}
+                    match={m}
+                    onOutcome={handleRecordOutcome}
+                    busy={isBusy}
+                  />
                 ))}
               </div>
             )}
 
             {/* No results after query */}
-            {queryResults.length === 0 && querySubmitted && (
+            {queryResults.length === 0 && bestProcResults.length === 0 && querySubmitted && (
               <div className="py-8 text-center">
                 <p className="text-sm text-[var(--text-3)]">No memories matched your query.</p>
                 <p className="mt-1 text-[12px] text-[var(--text-4)]">
@@ -1219,7 +1551,7 @@ export function PlaygroundApp() {
             )}
 
             {/* ---- Onboarding empty state ---- */}
-            {!querySubmitted && exploreRecords.length === 0 && (
+            {!querySubmitted && exploreRecords.length === 0 && bestProcResults.length === 0 && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="mb-10 space-y-3">
                   <h2 className="font-[family-name:var(--font-display)] text-2xl text-[var(--text-1)]">

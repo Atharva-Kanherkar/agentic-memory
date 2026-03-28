@@ -121,6 +121,7 @@ def test_wilson_score_handles_cold_start_and_small_samples():
     )
 
     assert cold.wilson_score == 0.0
+    assert one_of_one.wilson_score > cold.wilson_score
     assert one_of_one.wilson_score < ninety_of_hundred.wilson_score
 
 
