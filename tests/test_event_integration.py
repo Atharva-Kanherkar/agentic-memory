@@ -323,6 +323,29 @@ def test_retriever_reports_filtered_memory_types():
     print("  PASS  memory_types filter is reflected in memory.retrieved")
 
 
+def test_retriever_filtered_procedural_queries_emit_access_context():
+    now = datetime.now(timezone.utc)
+    procedural_record = replace(
+        SemanticMemory(content="Deploy with Docker", created_at=now, importance=0.6),
+        id="procedural-1",
+        memory_type="procedural",
+        modality="text",
+    )
+    procedural_store = FakeStore("procedural", [(procedural_record, 0.9)])
+    bus = EventBus()
+    recorder = EventRecorder(bus, "memory.retrieved", "memory.accessed")
+    retriever = UnifiedRetriever(stores={"procedural": procedural_store}, event_bus=bus)
+
+    results = retriever.query("docker", memory_types=["procedural"], top_k=1)
+
+    assert len(results) == 1
+    assert recorder.events[0].data["memory_types"] == ("procedural",)
+    assert recorder.events[1].data["memory_type"] == "procedural"
+    assert recorder.events[1].data["access_count"] == 1
+    assert procedural_store.updated_ids == [procedural_record.id]
+    print("  PASS  filtered procedural queries emit access events like other store types")
+
+
 def test_retriever_temporal_queries_emit_and_access_episodic_context():
     now = datetime.now(timezone.utc)
     episode = EpisodicMemory(
@@ -375,5 +398,6 @@ if __name__ == "__main__":
     test_retriever_vector_queries_emit_retrieved_ranked_and_accessed()
     test_retriever_vector_queries_emit_empty_summary_without_access_events()
     test_retriever_reports_filtered_memory_types()
+    test_retriever_filtered_procedural_queries_emit_access_context()
     test_retriever_temporal_queries_emit_and_access_episodic_context()
     print("\nAll tests passed.")

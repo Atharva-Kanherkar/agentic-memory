@@ -169,6 +169,13 @@ def _parse_memory_types(raw_value: str | None) -> list[str] | None:
     if not values:
         return None
 
+    return _validate_memory_types(values)
+
+
+def _validate_memory_types(values: list[str]) -> list[str]:
+    if not values:
+        return []
+
     supported = {"semantic", "episodic", "procedural"}
     invalid = [value for value in values if value not in supported]
     if invalid:
@@ -672,11 +679,21 @@ def create_app(
         text = payload.get("query", "").strip()
         if not text:
             raise HTTPException(status_code=400, detail="query is required")
-        results = service().retriever.query(
-            text,
-            top_k=int(payload.get("top_k", 5)),
-            memory_types=payload.get("memory_types"),
-        )
+        try:
+            memory_types = payload.get("memory_types")
+            if memory_types is not None:
+                if not isinstance(memory_types, list) or not all(
+                    isinstance(value, str) for value in memory_types
+                ):
+                    raise ValueError("memory_types must be an array of strings")
+                memory_types = _validate_memory_types(memory_types)
+            results = service().retriever.query(
+                text,
+                top_k=int(payload.get("top_k", 5)),
+                memory_types=memory_types,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"results": [_serialise_ranked_result(result) for result in results]}
 
     @app.post("/api/retrieval/query-by-image")
