@@ -190,7 +190,7 @@ async def test_store_media_backed_procedure_via_api():
     media_root = tempfile.mkdtemp(prefix="memory_api_media_")
     try:
         async with make_client(media_root=media_root) as client:
-            response = await client.post(
+            create = await client.post(
                 "/api/memories/procedural/file",
                 data={
                     "content": "Review migration checklist",
@@ -206,9 +206,13 @@ async def test_store_media_backed_procedure_via_api():
                     ("file", ("checklist.pdf", b"%PDF-1.4\nchecklist", "application/pdf")),
                 ],
             )
+            query = await client.post(
+                "/api/retrieval/query",
+                json={"query": "migration checklist", "top_k": 1, "memory_types": ["procedural"]},
+            )
 
-        assert response.status_code == 200
-        record = response.json()["record"]
+        assert create.status_code == 200
+        record = create.json()["record"]
         assert record["modality"] == "multimodal"
         assert record["media_type"] == "pdf"
         assert record["has_media"] is True
@@ -218,15 +222,29 @@ async def test_store_media_backed_procedure_via_api():
             "Validate preconditions",
             "Run the migration",
         ]
+        assert query.status_code == 200
+        retrieved = query.json()["results"][0]["record"]
+        assert retrieved["id"] == record["id"]
+        assert retrieved["media_ref"] == record["media_ref"]
+        assert retrieved["media_type"] == "pdf"
+        assert retrieved["text_description"] == "Reference checklist for the migration sequence"
     finally:
         shutil.rmtree(media_root, ignore_errors=True)
 
 
 @pytest.mark.anyio
-async def test_procedural_api_validation_rejects_empty_steps_and_bad_modalities():
+async def test_procedural_api_validation_rejects_missing_content_empty_steps_and_bad_modalities():
     media_root = tempfile.mkdtemp(prefix="memory_api_media_")
     try:
         async with make_client(media_root=media_root) as client:
+            missing_content = await client.post(
+                "/api/memories/procedural/file",
+                data={},
+                files=[
+                    ("steps", (None, "Package dependencies")),
+                    ("file", ("diagram.png", b"png-bytes", "image/png")),
+                ],
+            )
             empty_steps = await client.post(
                 "/api/memories/procedural",
                 json={"content": "Deploy to Lambda", "steps": []},
@@ -240,12 +258,84 @@ async def test_procedural_api_validation_rejects_empty_steps_and_bad_modalities(
                 ],
             )
 
+        assert missing_content.status_code == 400
+        assert missing_content.json()["detail"] == "content is required"
         assert empty_steps.status_code == 400
         assert empty_steps.json()["detail"] == "steps must contain at least one entry"
         assert bad_file.status_code == 400
         assert bad_file.json()["detail"] == (
             "multimodal file uploads require a supported image, audio, video, or PDF file"
         )
+    finally:
+        shutil.rmtree(media_root, ignore_errors=True)
+
+
+@pytest.mark.anyio
+async def test_end_to_end_operator_flow_covers_all_three_memory_types():
+    media_root = tempfile.mkdtemp(prefix="memory_api_media_")
+    try:
+        async with make_client(media_root=media_root) as client:
+            semantic = await client.post(
+                "/api/memories/semantic",
+                json={"content": "Lambda deployments often use IAM roles for execution"},
+            )
+            episodic = await client.post(
+                "/api/memories/episodic/text",
+                json={
+                    "session_id": "deploy-session",
+                    "text": "We debugged a Lambda deploy failure caused by a missing environment variable",
+                },
+            )
+            procedural = await client.post(
+                "/api/memories/procedural/file",
+                data={
+                    "content": "Deploy Lambda with a migration checklist",
+                    "modality": "multimodal",
+                    "media_type": "pdf",
+                    "text_description": "Checklist PDF for the deploy sequence",
+                },
+                files=[
+                    ("steps", (None, "Open the checklist")),
+                    ("steps", (None, "Validate the deploy preconditions")),
+                    ("steps", (None, "Run sam deploy")),
+                    ("preconditions", (None, "AWS CLI configured")),
+                    ("file", ("checklist.pdf", b"%PDF-1.4\nchecklist", "application/pdf")),
+                ],
+            )
+            broad_query = await client.post(
+                "/api/retrieval/query",
+                json={"query": "Lambda deploy checklist", "top_k": 5},
+            )
+
+            procedure_id = procedural.json()["record"]["id"]
+            for _ in range(3):
+                await client.post(
+                    f"/api/memories/procedural/{procedure_id}/outcome",
+                    json={"success": True},
+                )
+            await client.post(
+                f"/api/memories/procedural/{procedure_id}/outcome",
+                json={"success": False},
+            )
+            best = await client.post(
+                "/api/retrieval/best-procedures",
+                json={"task": "Lambda deploy checklist", "top_k": 1},
+            )
+
+        assert semantic.status_code == 200
+        assert episodic.status_code == 200
+        assert procedural.status_code == 200
+        assert broad_query.status_code == 200
+        assert {
+            item["record"]["memory_type"] for item in broad_query.json()["results"]
+        } == {"semantic", "episodic", "procedural"}
+        assert best.status_code == 200
+        best_match = best.json()["results"][0]
+        assert best_match["record"]["id"] == procedure_id
+        assert best_match["record"]["success_count"] == 3
+        assert best_match["record"]["failure_count"] == 1
+        assert best_match["record"]["media_type"] == "pdf"
+        assert best_match["record"]["has_media"] is True
     finally:
         shutil.rmtree(media_root, ignore_errors=True)
 

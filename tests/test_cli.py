@@ -458,6 +458,19 @@ def test_record_outcome_cli_updates_counts():
     print("  PASS  CLI record-outcome updates procedural counters")
 
 
+def test_record_outcome_cli_accepts_success_flag():
+    record = ProceduralMemory(content="Deploy to Lambda", steps=["Package", "Deploy"])
+    store = RecordingProceduralStore(record=record)
+
+    with patch.object(cli, "_make_bus", return_value=EventBus()):
+        with patch.object(cli, "_make_procedural_store", return_value=store):
+            stdout, _ = run_cli(["cli", "record-outcome", record.id, "--success"])
+
+    assert store.outcomes == [(record.id, True)]
+    assert "success=1" in stdout
+    print("  PASS  CLI record-outcome accepts the --success flag")
+
+
 def test_best_procedure_cli_prints_ranked_matches():
     record = ProceduralMemory(
         content="Deploy to Lambda via SAM",
@@ -498,5 +511,6 @@ if __name__ == "__main__":
     test_store_procedure_cli_smoke()
     test_store_media_backed_procedure_cli_smoke()
     test_record_outcome_cli_updates_counts()
+    test_record_outcome_cli_accepts_success_flag()
     test_best_procedure_cli_prints_ranked_matches()
     print("\nAll tests passed.")
