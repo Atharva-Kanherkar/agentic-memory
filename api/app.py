@@ -563,7 +563,13 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        service().procedural_store.store(record)
+        try:
+            service().procedural_store.store(record)
+        except EmbeddingProviderError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini embedding provider failed after retries",
+            ) from exc
         return {"record": _serialise_record(record)}
 
     @app.post("/api/memories/procedural/file")

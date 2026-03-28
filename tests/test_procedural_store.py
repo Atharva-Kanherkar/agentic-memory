@@ -93,6 +93,17 @@ def make_media_file(suffix: str, data: bytes) -> str:
     return path
 
 
+def cleanup() -> None:
+    for path in _TEMP_DIRS:
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+            continue
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
 def test_text_procedure_round_trip_preserves_metadata():
     store, _ = fresh_setup()
     created_at = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
@@ -296,12 +307,15 @@ def test_get_best_procedures_returns_empty_for_empty_store():
 
 if __name__ == "__main__":
     print("Procedural store tests:\n")
-    test_text_procedure_round_trip_preserves_metadata()
-    test_store_emits_memory_stored_with_procedural_fields()
-    test_media_backed_procedure_round_trip_uses_combined_embedding_path()
-    test_record_outcome_rewrites_metadata_without_reembedding()
-    test_record_outcome_missing_record_is_a_no_op()
-    test_get_best_procedures_reranks_by_wilson_score()
-    test_untested_procedures_rank_on_similarity_only()
-    test_get_best_procedures_returns_empty_for_empty_store()
-    print("\nAll tests passed.")
+    try:
+        test_text_procedure_round_trip_preserves_metadata()
+        test_store_emits_memory_stored_with_procedural_fields()
+        test_media_backed_procedure_round_trip_uses_combined_embedding_path()
+        test_record_outcome_rewrites_metadata_without_reembedding()
+        test_record_outcome_missing_record_is_a_no_op()
+        test_get_best_procedures_reranks_by_wilson_score()
+        test_untested_procedures_rank_on_similarity_only()
+        test_get_best_procedures_returns_empty_for_empty_store()
+        print("\nAll tests passed.")
+    finally:
+        cleanup()
