@@ -61,6 +61,43 @@ async def test_store_semantic_and_query_mixed_results():
 
 
 @pytest.mark.anyio
+async def test_query_endpoint_filters_to_procedural_results():
+    async with make_client() as client:
+        await client.post("/api/memories/semantic", json={"content": "Semantic fact about Docker"})
+        await client.post(
+            "/api/memories/episodic/text",
+            json={"session_id": "session-docker", "text": "We struggled with Docker networking"},
+        )
+        await client.post(
+            "/api/memories/procedural",
+            json={
+                "content": "Deploy with Docker Compose",
+                "steps": ["Build the image", "Run docker compose up"],
+            },
+        )
+
+        response = await client.post(
+            "/api/retrieval/query",
+            json={"query": "Docker", "top_k": 3, "memory_types": ["procedural"]},
+        )
+
+    assert response.status_code == 200
+    assert {item["record"]["memory_type"] for item in response.json()["results"]} == {"procedural"}
+
+
+@pytest.mark.anyio
+async def test_query_endpoint_rejects_invalid_memory_types():
+    async with make_client() as client:
+        response = await client.post(
+            "/api/retrieval/query",
+            json={"query": "Docker", "memory_types": ["procedural", "unknown"]},
+        )
+
+    assert response.status_code == 400
+    assert "Unsupported memory_types" in response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_store_procedural_memory_and_record_outcome_via_api():
     async with make_client() as client:
         create = await client.post(

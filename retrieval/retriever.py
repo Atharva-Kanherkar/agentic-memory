@@ -13,8 +13,9 @@ CANDIDATE_MULTIPLIER = 3  # over-fetch from each store to give the reranker room
 class UnifiedRetriever:
     """Queries across memory stores, applies weighted ranking, and tracks access.
 
-    Currently wraps SemanticStore only. When episodic and procedural stores
-    are added, they join the _stores dict and fan-out happens automatically.
+    The retriever fans out across whichever stores are present in `_stores`.
+    Semantic, episodic, and procedural stores all participate automatically
+    once they are wired into that mapping.
     """
 
     def __init__(self, stores: dict[str, BaseStore], event_bus: EventBus | None = None):

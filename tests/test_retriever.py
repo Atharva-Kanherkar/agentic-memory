@@ -125,15 +125,30 @@ def test_access_persists_across_instances():
 
 
 def test_memory_types_filter():
-    store, retriever, _ = fresh_setup()
-    store.store(SemanticMemory(content="Test fact"))
+    semantic_store, episodic_store, procedural_store, retriever, _ = fresh_mixed_setup()
+    semantic_store.store(SemanticMemory(content="Docker facts"))
+    episodic_store.store(
+        EpisodicMemory(content="We struggled with Docker networking", session_id="session-docker")
+    )
+    procedural_store.store(
+        ProceduralMemory(
+            content="Deploy with Docker Compose",
+            steps=["Build the image", "Run docker compose up"],
+        )
+    )
 
-    results = retriever.query("test", memory_types=["semantic"])
+    results = retriever.query("docker", memory_types=["semantic"])
     assert len(results) > 0, "Should find results when filtering for semantic"
+    assert {result.record.memory_type for result in results} == {"semantic"}
 
-    results = retriever.query("test", memory_types=["episodic"])
-    assert len(results) == 0, "Should find nothing when filtering for episodic (no such store)"
-    print(f"  PASS  memory_types filter works")
+    results = retriever.query("docker", memory_types=["episodic"])
+    assert len(results) > 0, "Should find episodic results when filtering for episodic"
+    assert {result.record.memory_type for result in results} == {"episodic"}
+
+    results = retriever.query("docker", memory_types=["procedural"])
+    assert len(results) > 0, "Should find procedural results when filtering for procedural"
+    assert {result.record.memory_type for result in results} == {"procedural"}
+    print("  PASS  memory_types filter works for semantic, episodic, and procedural stores")
 
 
 def test_over_fetch():
