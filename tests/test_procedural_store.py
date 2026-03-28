@@ -245,7 +245,7 @@ def test_get_best_procedures_reranks_by_wilson_score():
     store.retrieve = lambda task, top_k=5: [  # type: ignore[method-assign]
         (sam, 0.9),
         (serverless, 0.9),
-        (fresh, 0.85),
+        (fresh, 0.4),
     ][:top_k]
 
     results = store.get_best_procedure_matches("deploy to Lambda", top_k=3)
@@ -257,6 +257,35 @@ def test_get_best_procedures_reranks_by_wilson_score():
     ]
     assert results[0].combined_score > results[1].combined_score > results[2].combined_score
     print("  PASS  best-procedure reranking prefers higher Wilson score when similarity is controlled")
+
+
+def test_untested_procedures_rank_on_similarity_only():
+    store, _ = fresh_setup()
+    tested = ProceduralMemory(
+        content="Deploy to Lambda via SAM",
+        steps=["Package", "Deploy"],
+        success_count=3,
+        failure_count=1,
+    )
+    fresh = ProceduralMemory(
+        content="Deploy to Lambda manually",
+        steps=["Package", "Deploy"],
+    )
+
+    store.retrieve = lambda task, top_k=5: [  # type: ignore[method-assign]
+        (tested, 0.6),
+        (fresh, 0.8),
+    ][:top_k]
+
+    results = store.get_best_procedure_matches("deploy to Lambda", top_k=2)
+
+    assert [result.record.content for result in results] == [
+        "Deploy to Lambda manually",
+        "Deploy to Lambda via SAM",
+    ]
+    assert results[0].combined_score == 0.8
+    assert results[0].wilson_score == 0.0
+    print("  PASS  untested procedures compete on similarity alone instead of taking a cold-start penalty")
 
 
 def test_get_best_procedures_returns_empty_for_empty_store():
@@ -273,5 +302,6 @@ if __name__ == "__main__":
     test_record_outcome_rewrites_metadata_without_reembedding()
     test_record_outcome_missing_record_is_a_no_op()
     test_get_best_procedures_reranks_by_wilson_score()
+    test_untested_procedures_rank_on_similarity_only()
     test_get_best_procedures_returns_empty_for_empty_store()
     print("\nAll tests passed.")

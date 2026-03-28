@@ -151,9 +151,16 @@ class ProceduralStore(BaseStore):
                 record=record,
                 similarity=similarity,
                 wilson_score=record.wilson_score,
+                # TODO: v2 should consider an explicit exploration policy so
+                # highly relevant untested procedures are surfaced intentionally
+                # instead of only through this simpler conditional weighting.
                 combined_score=(
-                    similarity * _PROCEDURAL_SIMILARITY_WEIGHT
-                    + record.wilson_score * _PROCEDURAL_WILSON_WEIGHT
+                    similarity
+                    if record.total_outcomes == 0
+                    else (
+                        similarity * _PROCEDURAL_SIMILARITY_WEIGHT
+                        + record.wilson_score * _PROCEDURAL_WILSON_WEIGHT
+                    )
                 ),
             )
             for record, similarity in candidates
