@@ -29,6 +29,9 @@ def _effective_half_life(record: MemoryRecord) -> float:
         raise ValueError(f"Unsupported memory_type '{record.memory_type}'")
 
     importance = _clamp(float(getattr(record, "importance", 0.0)))
+    # TODO(#49): Evaluate replacing this hard threshold with a smooth
+    # importance-weighted half-life curve once issue #42 is shipped.
+    # https://github.com/agentclash/agentic-memory/issues/49
     if importance >= config.IMPORTANCE_FLOOR_THRESHOLD:
         half_life *= config.IMPORTANCE_FLOOR_MULTIPLIER
     return half_life
